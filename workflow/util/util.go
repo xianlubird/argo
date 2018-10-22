@@ -240,6 +240,8 @@ func SubmitWorkflow(wfIf v1alpha1.WorkflowInterface, wf *wfv1.Workflow, opts *Su
 	if opts.Name != "" {
 		wf.ObjectMeta.Name = opts.Name
 	}
+
+	common.ReplaceTemplateName(wf)
 	err := validate.ValidateWorkflow(wf)
 	if err != nil {
 		return nil, err
