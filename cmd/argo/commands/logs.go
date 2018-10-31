@@ -46,6 +46,7 @@ func NewLogsCommand() *cobra.Command {
 				cmd.HelpFunc()(cmd, args)
 				os.Exit(1)
 			}
+			printer.container, workflow, printer.follow, since, sinceTime, tail, printer.timestamps = ParseLogFlagFromParent(cmd)
 			conf, err := clientConfig.ClientConfig()
 			errors.CheckError(err)
 			printer.kubeClient = kubernetes.NewForConfigOrDie(conf)

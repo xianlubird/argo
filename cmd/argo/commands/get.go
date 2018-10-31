@@ -8,15 +8,20 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	wfv1 "github.com/argoproj/argo/pkg/apis/workflow/v1alpha1"
 	"github.com/argoproj/pkg/humanize"
 	"github.com/ghodss/yaml"
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	wfv1 "github.com/argoproj/argo/pkg/apis/workflow/v1alpha1"
+	"k8s.io/client-go/kubernetes"
 )
 
 const onExitSuffix = "onExit"
+
+var (
+	kubeClient   *kubernetes.Clientset
+	showResUsage bool
+)
 
 func NewGetCommand() *cobra.Command {
 	var (
@@ -32,6 +37,7 @@ func NewGetCommand() *cobra.Command {
 				os.Exit(1)
 			}
 			wfClient := InitWorkflowClient()
+			kubeClient = initKubeClient()
 			wf, err := wfClient.Get(args[0], metav1.GetOptions{})
 			if err != nil {
 				log.Fatal(err)
@@ -42,6 +48,7 @@ func NewGetCommand() *cobra.Command {
 
 	command.Flags().StringVarP(&output, "output", "o", "", "Output format. One of: json|yaml|wide")
 	command.Flags().BoolVar(&noColor, "no-color", false, "Disable colorized output")
+	command.Flags().BoolVar(&showResUsage, "show", false, "Show workflow resource usage")
 	return command
 }
 
@@ -84,6 +91,11 @@ func printWorkflowHelper(wf *wfv1.Workflow, outFmt string) {
 	}
 	if !wf.Status.StartedAt.IsZero() {
 		fmt.Printf(fmtStr, "Duration:", humanize.RelativeDuration(wf.Status.StartedAt.Time, wf.Status.FinishedAt.Time))
+		if showResUsage {
+			_, cpu, memory, _ := getPodResource(wf, kubeClient)
+			fmt.Printf("%-20s %v    (core*hour)\n", "Total CPU:", cpu)
+			fmt.Printf("%-20s %v    (GB*hour)\n", "Total Memory:", memory)
+		}
 	}
 
 	if len(wf.Spec.Arguments.Parameters) > 0 {
@@ -127,7 +139,11 @@ func printWorkflowHelper(wf *wfv1.Workflow, outFmt string) {
 		if outFmt == "wide" {
 			fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tARTIFACTS\tMESSAGE\n", ansiFormat("STEP", FgDefault))
 		} else {
-			fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tMESSAGE\n", ansiFormat("STEP", FgDefault))
+			if showResUsage {
+				fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tMESSAGE\tCPU(core*hour)\tMEMORY(GB*hour)\n", ansiFormat("STEP", FgDefault))
+			} else {
+				fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tMESSAGE\n", ansiFormat("STEP", FgDefault))
+			}
 		}
 
 		// Convert Nodes to Render Trees
@@ -407,9 +423,19 @@ func printNode(w *tabwriter.Writer, wf *wfv1.Workflow, node wfv1.NodeStatus, dep
 	var args []interface{}
 	duration := humanize.RelativeDurationShort(node.StartedAt.Time, node.FinishedAt.Time)
 	if node.Type == wfv1.NodeTypePod {
-		args = []interface{}{nodePrefix, nodeName, node.ID, duration, node.Message}
+		if showResUsage {
+			cpu, memory := getCpuMemoryRequest(node, wf.Namespace, kubeClient, wf)
+			args = []interface{}{nodePrefix, nodeName, node.ID, duration, node.Message, cpu, memory}
+		} else {
+			args = []interface{}{nodePrefix, nodeName, node.ID, duration, node.Message}
+		}
+
 	} else {
-		args = []interface{}{nodePrefix, nodeName, "", "", node.Message}
+		if showResUsage {
+			args = []interface{}{nodePrefix, nodeName, "", "", node.Message, 0.0, 0.0}
+		} else {
+			args = []interface{}{nodePrefix, nodeName, "", "", node.Message}
+		}
 	}
 	if outFmt == "wide" {
 		msg := args[len(args)-1]
@@ -417,7 +443,11 @@ func printNode(w *tabwriter.Writer, wf *wfv1.Workflow, node wfv1.NodeStatus, dep
 		args = append(args, msg)
 		fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\t%s\n", args...)
 	} else {
-		fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\n", args...)
+		if showResUsage {
+			fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\t%g\t%g\n", args...)
+		} else {
+			fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\n", args...)
+		}
 	}
 }
 
