@@ -108,6 +108,17 @@ func (woc *wfOperationCtx) createWorkflowPod(nodeName string, mainCtr apiv1.Cont
 	tmpl = tmpl.DeepCopy()
 	wfSpec := woc.wf.Spec.DeepCopy()
 	mainCtr.Name = common.MainContainerName
+	//paas the runAsUser id into wf container if exist
+	if tmpl.SecurityContext != nil {
+		woc.log.Infof("createWorkflowPod: add SecurityContext in tmpl (%v)", *tmpl.SecurityContext)
+		//paas the runAsUser id into wf container
+		if *tmpl.SecurityContext.RunAsUser > 0 {
+			sc := &apiv1.SecurityContext{
+				RunAsUser: tmpl.SecurityContext.RunAsUser,
+			}
+			mainCtr.SecurityContext = sc
+		}
+	}
 	pod := &apiv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: nodeID,
@@ -270,6 +281,17 @@ func (woc *wfOperationCtx) newWaitContainer(tmpl *wfv1.Template) (*apiv1.Contain
 	ctr.Command = []string{"argoexec"}
 	ctr.Args = []string{"wait"}
 	ctr.VolumeMounts = woc.createVolumeMounts()
+	if tmpl.SecurityContext != nil {
+		woc.log.Infof("newWaitContainer: add securityContext in tmpl (%++v)", *tmpl.SecurityContext)
+		//paas the runAsUser id into wf container
+		if *tmpl.SecurityContext.RunAsUser > 0 {
+			permissionInt := int64(0)
+			sc := &apiv1.SecurityContext{
+				RunAsUser: &permissionInt,
+			}
+			ctr.SecurityContext = sc
+		}
+	}
 	return ctr, nil
 }
 

@@ -755,6 +755,15 @@ func (in *Template) DeepCopyInto(out *Template) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.SecurityContext != nil {
+		in, out := &in.SecurityContext, &out.SecurityContext
+		if *in == nil {
+			*out = nil
+		} else {
+			*out = new(v1.PodSecurityContext)
+			(*in).DeepCopyInto(*out)
+		}
+	}
 	return
 }
 

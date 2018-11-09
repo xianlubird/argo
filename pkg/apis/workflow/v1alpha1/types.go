@@ -203,6 +203,10 @@ type Template struct {
 
 	// Tolerations to apply to workflow pods.
 	Tolerations []apiv1.Toleration `json:"tolerations,omitempty"`
+
+	// SecurityContext holds pod-level security attributes and common container settings.
+	// +optional
+	SecurityContext *apiv1.PodSecurityContext `json:"securityContext,omitempty"`
 }
 
 // Inputs are the mechanism for passing parameters, artifacts, volumes from one template to another
