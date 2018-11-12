@@ -157,3 +157,7 @@ func ParseLogFlagFromParent(cmd *cobra.Command) (containerName string, workflow 
 	}
 	return
 }
+
+func InitKubeClient() *kubernetes.Clientset {
+	return initKubeClient()
+}
