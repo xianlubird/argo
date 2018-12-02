@@ -18,6 +18,7 @@ const (
 	MainContainerName = "main"
 	InitContainerName = "init"
 	WaitContainerName = "wait"
+	NonrootArgoExecUid = 800
 
 	// PodMetadataVolumeName is the volume name defined in a workflow pod spec to expose pod metadata via downward API
 	PodMetadataVolumeName = "podmetadata"

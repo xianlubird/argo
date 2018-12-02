@@ -257,6 +257,8 @@ spec:
         - workflow-controller-configmap
         - --executor-image
         - argoproj/argoexec:v2.2.1
+        - --nonroot-executor-image
+        - registry.cn-hangzhou.aliyuncs.com/acs/argoexec:2.2.1
         command:
         - workflow-controller
         image: argoproj/workflow-controller:v2.2.1

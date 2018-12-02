@@ -42,6 +42,9 @@ type WorkflowController struct {
 	// cliExecutorImage is the executor image as specified from the command line
 	cliExecutorImage string
 
+	// cliNonRootExecutorImage is the nonroot executor image as specified from the command line
+	cliNonRootExecutorImage string
+
 	// cliExecutorImagePullPolicy is the executor imagePullPolicy as specified from the command line
 	cliExecutorImagePullPolicy string
 
@@ -71,6 +74,7 @@ func NewWorkflowController(
 	wfclientset wfclientset.Interface,
 	namespace,
 	executorImage,
+	nonrootExecutorImage,
 	executorImagePullPolicy,
 	configMap string,
 ) *WorkflowController {
@@ -81,6 +85,7 @@ func NewWorkflowController(
 		configMap:                  configMap,
 		namespace:                  namespace,
 		cliExecutorImage:           executorImage,
+		cliNonRootExecutorImage:    nonrootExecutorImage,
 		cliExecutorImagePullPolicy: executorImagePullPolicy,
 		wfQueue:                    workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
 		podQueue:                   workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),

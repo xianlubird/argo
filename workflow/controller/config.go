@@ -24,6 +24,9 @@ type WorkflowControllerConfig struct {
 	// ExecutorImage is the image name of the executor to use when running pods
 	ExecutorImage string `json:"executorImage,omitempty"`
 
+	// NonRootExecutorImage is the image name of the executor to use when running pods with RunAsUser in securitycontext
+	NonRootExecutorImage string `json:"nonrootExecutorImage,omitempty"`
+
 	// ExecutorImagePullPolicy is the imagePullPolicy of the executor to use when running pods
 	ExecutorImagePullPolicy string `json:"executorImagePullPolicy,omitempty"`
 

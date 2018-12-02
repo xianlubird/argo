@@ -32,6 +32,7 @@ func NewRootCommand() *cobra.Command {
 		clientConfig            clientcmd.ClientConfig
 		configMap               string // --configmap
 		executorImage           string // --executor-image
+		nonrootExecutorImage    string // --nonroot-executor-image
 		executorImagePullPolicy string // --executor-image-pull-policy
 		logLevel                string // --loglevel
 		glogLevel               int    // --gloglevel
@@ -69,7 +70,7 @@ func NewRootCommand() *cobra.Command {
 			wflientset := wfclientset.NewForConfigOrDie(config)
 
 			// start a controller on instances of our custom resource
-			wfController := controller.NewWorkflowController(config, kubeclientset, wflientset, namespace, executorImage, executorImagePullPolicy, configMap)
+			wfController := controller.NewWorkflowController(config, kubeclientset, wflientset, namespace, executorImage, nonrootExecutorImage, executorImagePullPolicy, configMap)
 			err = wfController.ResyncConfig()
 			if err != nil {
 				return err
@@ -92,6 +93,7 @@ func NewRootCommand() *cobra.Command {
 	command.AddCommand(cmdutil.NewVersionCmd(CLIName))
 	command.Flags().StringVar(&configMap, "configmap", "workflow-controller-configmap", "Name of K8s configmap to retrieve workflow controller configuration")
 	command.Flags().StringVar(&executorImage, "executor-image", "", "Executor image to use (overrides value in configmap)")
+	command.Flags().StringVar(&nonrootExecutorImage, "nonroot-executor-image", "", "Executor image to use (overrides value in configmap) for nonroot case in psp scenario")
 	command.Flags().StringVar(&executorImagePullPolicy, "executor-image-pull-policy", "", "Executor imagePullPolicy to use (overrides value in configmap)")
 	command.Flags().StringVar(&logLevel, "loglevel", "info", "Set the logging level. One of: debug|info|warn|error")
 	command.Flags().IntVar(&glogLevel, "gloglevel", 0, "Set the glog logging level")

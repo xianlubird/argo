@@ -22,3 +22,5 @@ spec:
         - workflow-controller-configmap
         - --executor-image
         - argoproj/argoexec:v2.2.1
+        - --nonroot-executor-image
+        - registry.cn-hangzhou.aliyuncs.com/acs/argoexec:2.2.1

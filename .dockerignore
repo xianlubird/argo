@@ -1,4 +1,5 @@
 *
 !dist
+!manifests
 dist/pkg
 !Gopkg.*
