@@ -27,6 +27,9 @@ type WorkflowControllerConfig struct {
 	// NonRootExecutorImage is the image name of the executor to use when running pods with RunAsUser in securitycontext
 	NonRootExecutorImage string `json:"nonrootExecutorImage,omitempty"`
 
+	// NonRootExecutor is the index for using non-root argoexec image for wf wait container
+	NonRootExecutor bool `json:"nonRootExecutor,omitempty"`
+
 	// ExecutorImagePullPolicy is the imagePullPolicy of the executor to use when running pods
 	ExecutorImagePullPolicy string `json:"executorImagePullPolicy,omitempty"`
 

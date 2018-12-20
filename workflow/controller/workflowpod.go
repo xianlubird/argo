@@ -281,26 +281,34 @@ func (woc *wfOperationCtx) newWaitContainer(tmpl *wfv1.Template) (*apiv1.Contain
 	ctr.Command = []string{"argoexec"}
 	ctr.Args = []string{"wait"}
 	ctr.VolumeMounts = woc.createVolumeMounts()
+	if woc.useNonRootExec(tmpl) {
+		permissionInt := int64(common.NonrootArgoExecUid)
+		if ctr.SecurityContext != nil {
+			ctr.SecurityContext.RunAsUser = &permissionInt
+		} else {
+			sc := &apiv1.SecurityContext{
+				RunAsUser: &permissionInt,
+			}
+			ctr.SecurityContext = sc
+		}
+		//use custom noroot argoexec image if wf config RunAsUser within psp validation
+		ctr.Image = woc.controller.Config.NonRootExecutorImage
+		ctr.Command = []string{"/bin/exec.sh"}
+		ctr.Args = []string{}
+	}
+
+	return ctr, nil
+}
+
+func (woc *wfOperationCtx) useNonRootExec(tmpl *wfv1.Template) bool {
 	if tmpl.SecurityContext != nil {
 		woc.log.Infof("newWaitContainer: add securityContext in tmpl (%++v)", *tmpl.SecurityContext)
 		//paas the runAsUser id into wf container
 		if *tmpl.SecurityContext.RunAsUser > 0 {
-			permissionInt := int64(common.NonrootArgoExecUid)
-			if ctr.SecurityContext != nil{
-				ctr.SecurityContext.RunAsUser = &permissionInt
-			}else{
-				sc := &apiv1.SecurityContext{
-					RunAsUser: &permissionInt,
-				}
-				ctr.SecurityContext = sc
-			}
-			//use custom noroot argoexec image if wf config RunAsUser within psp validation
-			ctr.Image = woc.controller.cliNonRootExecutorImage
-			ctr.Command = []string{"/bin/exec.sh"}
-			ctr.Args = []string{}
+			return true
 		}
 	}
-	return ctr, nil
+	return woc.controller.Config.NonRootExecutor
 }
 
 func (woc *wfOperationCtx) createEnvVars() []apiv1.EnvVar {
