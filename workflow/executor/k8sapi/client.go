@@ -37,20 +37,11 @@ func newK8sAPIClient(clientset *kubernetes.Clientset, config *restclient.Config,
 }
 
 func (c *k8sAPIClient) getFileContents(containerID, sourcePath string) (string, error) {
-	_, containerStatus, err := c.getContainerStatus(containerID)
+	fileContentBytes, err := ioutil.ReadFile(sourcePath)
 	if err != nil {
 		return "", err
 	}
-	command := []string{"cat", sourcePath}
-	exec, err := common.ExecPodContainer(c.config, c.namespace, c.podName, containerStatus.Name, true, false, command...)
-	if err != nil {
-		return "", err
-	}
-	stdOut, _, err := common.GetExecutorOutput(exec)
-	if err != nil {
-		return "", err
-	}
-	return stdOut.String(), nil
+	return string(fileContentBytes), nil
 }
 
 func (c *k8sAPIClient) createArchive(containerID, sourcePath string) (*bytes.Buffer, error) {

@@ -146,6 +146,7 @@ func (woc *wfOperationCtx) createWorkflowPod(nodeName string, mainCtr apiv1.Cont
 		if err != nil {
 			return nil, err
 		}
+		waitCtr.VolumeMounts = append(waitCtr.VolumeMounts, mainCtr.VolumeMounts...)
 		pod.Spec.Containers = append(pod.Spec.Containers, *waitCtr)
 	}
 
@@ -318,6 +319,8 @@ func (woc *wfOperationCtx) createVolumeMounts() []apiv1.VolumeMount {
 	switch woc.controller.Config.ContainerRuntimeExecutor {
 	case common.ContainerRuntimeExecutorKubelet:
 		return volumeMounts
+	case common.ContainerRuntimeExecutorK8sAPI:
+		return volumeMounts
 	default:
 		return append(volumeMounts, volumeMountDockerLib, volumeMountDockerSock)
 	}
@@ -329,6 +332,8 @@ func (woc *wfOperationCtx) createVolumes() []apiv1.Volume {
 	}
 	switch woc.controller.Config.ContainerRuntimeExecutor {
 	case common.ContainerRuntimeExecutorKubelet:
+		return volumes
+	case common.ContainerRuntimeExecutorK8sAPI:
 		return volumes
 	default:
 		return append(volumes, volumeDockerLib, volumeDockerSock)
