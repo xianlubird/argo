@@ -5,11 +5,13 @@ import (
 	wfv1 "github.com/argoproj/argo/pkg/apis/workflow/v1alpha1"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"os"
 	"strconv"
+	"strings"
 )
 
 func NewTopCommand() *cobra.Command {
@@ -34,9 +36,54 @@ func NewTopCommand() *cobra.Command {
 	return command
 }
 
+func getMetricsConfigMap(wf *wfv1.Workflow, kubeClient *kubernetes.Clientset) *v1.ConfigMap {
+	cm, err := kubeClient.CoreV1().ConfigMaps(wf.Namespace).Get(wf.Name, metav1.GetOptions{})
+	if err != nil {
+		log.Warningf("getMetricsConfigMap error %v", err)
+		return nil
+	}
+
+	return cm
+}
+
+func getWorkflowMetrics(metricsConfigMap *v1.ConfigMap) (float64, float64) {
+	if metricsConfigMap == nil {
+		log.Warningf("metricsConfigMap is nil")
+		return 0, 0
+	}
+	data := metricsConfigMap.Data
+	var totalCpu float64
+	var totalMemory float64
+
+	for podName, value := range data {
+		if strings.HasSuffix(podName, "cpu") {
+			tmpCpuValue, tmpErr := strconv.ParseFloat(value, 64)
+			if tmpErr != nil {
+				log.Warningf("Parse %s to float64 error %v", value, tmpErr)
+				continue
+			}
+			totalCpu += tmpCpuValue
+		}
+
+		if strings.HasSuffix(podName, "memory") {
+			tmpMemoryValue, tmpErr := strconv.ParseFloat(value, 64)
+			if tmpErr != nil {
+				log.Warningf("Parse %s to float64 error %v", value, tmpErr)
+				continue
+			}
+			totalMemory += tmpMemoryValue
+		}
+	}
+
+	totalCpu /= 1000
+	totalMemory /= 1024 * 1024 * 1024
+	return Decimal(totalCpu), Decimal(totalMemory)
+}
+
 func getPodResource(wf *wfv1.Workflow, kubeClient *kubernetes.Clientset) (float64, float64, float64, float64) {
 	if wf == nil {
-		log.Fatal("Wf is nil")
+		log.Warningf("Wf is nil")
+		return 0, 0, 0, 0
 	}
 	//unit  cpu/minute
 	cpuMax := 0.0
@@ -112,6 +159,42 @@ func getCpuMemoryRequest(node wfv1.NodeStatus, namespace string, kubeClient *kub
 	}
 
 	return 0, 0
+}
+
+func getPodMetrics(node wfv1.NodeStatus, metricsConfigMap *v1.ConfigMap) (float64, float64) {
+	if node.Type != wfv1.NodeTypePod {
+		return 0, 0
+	}
+
+	if metricsConfigMap == nil {
+		return 0, 0
+	}
+
+	data := metricsConfigMap.Data
+	var podCpuMetrics float64
+	var podMemoryMetrics float64
+
+	if tmpPodCpuStr, ok := data[node.ID+".cpu"]; ok {
+		tmpPodCpuValue, tmpErr := strconv.ParseFloat(tmpPodCpuStr, 64)
+		if tmpErr != nil {
+			log.Warningf("Parse %s to float64 error %v", tmpPodCpuStr, tmpErr)
+		} else {
+			podCpuMetrics = tmpPodCpuValue
+		}
+	}
+
+	if tmpPodMemoryStr, ok := data[node.ID+".memory"]; ok {
+		tmpPodMemoryValue, tmpErr := strconv.ParseFloat(tmpPodMemoryStr, 64)
+		if tmpErr != nil {
+			log.Warningf("Parse %s to float64 error %v", tmpPodMemoryStr, tmpErr)
+		} else {
+			podMemoryMetrics = tmpPodMemoryValue
+		}
+	}
+
+	podCpuMetrics /= 1000
+	podMemoryMetrics /= 1024 * 1024 * 1024
+	return Decimal(podCpuMetrics), Decimal(podMemoryMetrics)
 }
 
 func SetClientConfig(client clientcmd.ClientConfig) {

@@ -3,6 +3,7 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
+	"k8s.io/api/core/v1"
 	"log"
 	"os"
 	"strings"
@@ -19,8 +20,10 @@ import (
 const onExitSuffix = "onExit"
 
 var (
-	kubeClient   *kubernetes.Clientset
-	showResUsage bool
+	kubeClient       *kubernetes.Clientset
+	showResUsage     bool
+	showMetrics      bool
+	metricsConfigMap *v1.ConfigMap
 )
 
 func NewGetCommand() *cobra.Command {
@@ -36,11 +39,15 @@ func NewGetCommand() *cobra.Command {
 				cmd.HelpFunc()(cmd, args)
 				os.Exit(1)
 			}
+
 			wfClient := InitWorkflowClient()
 			kubeClient = initKubeClient()
 			wf, err := wfClient.Get(args[0], metav1.GetOptions{})
 			if err != nil {
 				log.Fatal(err)
+			}
+			if showMetrics {
+				metricsConfigMap = getMetricsConfigMap(wf, kubeClient)
 			}
 			printWorkflow(wf, output)
 		},
@@ -49,6 +56,7 @@ func NewGetCommand() *cobra.Command {
 	command.Flags().StringVarP(&output, "output", "o", "", "Output format. One of: json|yaml|wide")
 	command.Flags().BoolVar(&noColor, "no-color", false, "Disable colorized output")
 	command.Flags().BoolVar(&showResUsage, "show", false, "Show workflow resource usage")
+	command.Flags().BoolVar(&showMetrics, "metrics", false, "Show workflow metrics usage")
 	return command
 }
 
@@ -96,6 +104,11 @@ func printWorkflowHelper(wf *wfv1.Workflow, outFmt string) {
 			fmt.Printf("%-20s %v    (core*hour)\n", "Total CPU:", cpu)
 			fmt.Printf("%-20s %v    (GB*hour)\n", "Total Memory:", memory)
 		}
+		if showMetrics {
+			cpu, memory := getWorkflowMetrics(metricsConfigMap)
+			fmt.Printf("%-20s %v    (core*hour)\n", "Total CPU:", cpu)
+			fmt.Printf("%-20s %v    (GB*hour)\n", "Total Memory:", memory)
+		}
 	}
 
 	if len(wf.Spec.Arguments.Parameters) > 0 {
@@ -140,6 +153,8 @@ func printWorkflowHelper(wf *wfv1.Workflow, outFmt string) {
 			fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tARTIFACTS\tMESSAGE\n", ansiFormat("STEP", FgDefault))
 		} else {
 			if showResUsage {
+				fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tMESSAGE\tCPU(core*hour)\tMEMORY(GB*hour)\n", ansiFormat("STEP", FgDefault))
+			} else if showMetrics {
 				fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tMESSAGE\tCPU(core*hour)\tMEMORY(GB*hour)\n", ansiFormat("STEP", FgDefault))
 			} else {
 				fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tMESSAGE\n", ansiFormat("STEP", FgDefault))
@@ -426,12 +441,17 @@ func printNode(w *tabwriter.Writer, wf *wfv1.Workflow, node wfv1.NodeStatus, dep
 		if showResUsage {
 			cpu, memory := getCpuMemoryRequest(node, wf.Namespace, kubeClient, wf)
 			args = []interface{}{nodePrefix, nodeName, node.ID, duration, node.Message, cpu, memory}
+		} else if showMetrics {
+			cpu, memory := getPodMetrics(node, metricsConfigMap)
+			args = []interface{}{nodePrefix, nodeName, node.ID, duration, node.Message, cpu, memory}
 		} else {
 			args = []interface{}{nodePrefix, nodeName, node.ID, duration, node.Message}
 		}
 
 	} else {
 		if showResUsage {
+			args = []interface{}{nodePrefix, nodeName, "", "", node.Message, 0.0, 0.0}
+		} else if showMetrics {
 			args = []interface{}{nodePrefix, nodeName, "", "", node.Message, 0.0, 0.0}
 		} else {
 			args = []interface{}{nodePrefix, nodeName, "", "", node.Message}
@@ -444,6 +464,8 @@ func printNode(w *tabwriter.Writer, wf *wfv1.Workflow, node wfv1.NodeStatus, dep
 		fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\t%s\n", args...)
 	} else {
 		if showResUsage {
+			fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\t%g\t%g\n", args...)
+		} else if showMetrics {
 			fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\t%g\t%g\n", args...)
 		} else {
 			fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\n", args...)
