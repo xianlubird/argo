@@ -121,7 +121,8 @@ func (woc *wfOperationCtx) createWorkflowPod(nodeName string, mainCtr apiv1.Cont
 	}
 	pod := &apiv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: nodeID,
+			Name:      nodeID,
+			Namespace: woc.wf.ObjectMeta.Namespace,
 			Labels: map[string]string{
 				common.LabelKeyWorkflow:  woc.wf.ObjectMeta.Name, // Allows filtering by pods related to specific workflow
 				common.LabelKeyCompleted: "false",                // Allows filtering by incomplete workflow pods
@@ -156,6 +157,7 @@ func (woc *wfOperationCtx) createWorkflowPod(nodeName string, mainCtr apiv1.Cont
 		if err != nil {
 			return nil, err
 		}
+		waitCtr.VolumeMounts = append(waitCtr.VolumeMounts, mainCtr.VolumeMounts...)
 		pod.Spec.Containers = append(pod.Spec.Containers, *waitCtr)
 	}
 
@@ -313,6 +315,13 @@ func (woc *wfOperationCtx) useNonRootExec(tmpl *wfv1.Template) bool {
 
 func (woc *wfOperationCtx) createEnvVars() []apiv1.EnvVar {
 	switch woc.controller.Config.ContainerRuntimeExecutor {
+	case common.ContainerRuntimeExecutorK8sAPI:
+		return append(execEnvVars,
+			apiv1.EnvVar{
+				Name:  common.EnvVarContainerRuntimeExecutor,
+				Value: woc.controller.Config.ContainerRuntimeExecutor,
+			},
+		)
 	case common.ContainerRuntimeExecutorKubelet:
 		return append(execEnvVars,
 			apiv1.EnvVar{
@@ -348,6 +357,8 @@ func (woc *wfOperationCtx) createVolumeMounts() []apiv1.VolumeMount {
 	switch woc.controller.Config.ContainerRuntimeExecutor {
 	case common.ContainerRuntimeExecutorKubelet:
 		return volumeMounts
+	case common.ContainerRuntimeExecutorK8sAPI:
+		return volumeMounts
 	default:
 		return append(volumeMounts, volumeMountDockerLib, volumeMountDockerSock)
 	}
@@ -359,6 +370,8 @@ func (woc *wfOperationCtx) createVolumes() []apiv1.Volume {
 	}
 	switch woc.controller.Config.ContainerRuntimeExecutor {
 	case common.ContainerRuntimeExecutorKubelet:
+		return volumes
+	case common.ContainerRuntimeExecutorK8sAPI:
 		return volumes
 	default:
 		return append(volumes, volumeDockerLib, volumeDockerSock)

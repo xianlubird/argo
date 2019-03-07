@@ -63,6 +63,9 @@ type WorkflowControllerConfig struct {
 	MetricsConfig metrics.PrometheusConfig `json:"metricsConfig,omitempty"`
 
 	TelemetryConfig metrics.PrometheusConfig `json:"telemetryConfig,omitempty"`
+
+	// Parallelism limits the max total parallel workflows that can execute at the same time
+	Parallelism int `json:"parallelism,omitempty"`
 }
 
 // ArtifactRepository represents a artifact repository in which a controller will store its artifacts
@@ -120,6 +123,7 @@ func (wfc *WorkflowController) updateConfig(cm *apiv1.ConfigMap) error {
 		return errors.Errorf(errors.CodeBadRequest, "ConfigMap '%s' does not have executorImage", wfc.configMap)
 	}
 	wfc.Config = config
+	wfc.throttler.SetParallelism(config.Parallelism)
 	return nil
 }
 
