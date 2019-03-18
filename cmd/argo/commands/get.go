@@ -9,7 +9,9 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/argoproj/argo/errors"
 	wfv1 "github.com/argoproj/argo/pkg/apis/workflow/v1alpha1"
+	"github.com/argoproj/argo/util/file"
 	"github.com/argoproj/pkg/humanize"
 	"github.com/ghodss/yaml"
 	"github.com/spf13/cobra"
@@ -49,6 +51,10 @@ func NewGetCommand() *cobra.Command {
 			if showMetrics {
 				metricsConfigMap = getMetricsConfigMap(wf, kubeClient)
 			}
+			err = CheckAndDecompress(wf)
+			if err != nil {
+				log.Fatal(err)
+			}
 			printWorkflow(wf, output)
 		},
 	}
@@ -58,6 +64,21 @@ func NewGetCommand() *cobra.Command {
 	command.Flags().BoolVar(&showResUsage, "show", false, "Show workflow resource usage")
 	command.Flags().BoolVar(&showMetrics, "metrics", false, "Show workflow metrics usage")
 	return command
+}
+
+func CheckAndDecompress(wf *wfv1.Workflow) error {
+	if wf.Status.CompressedNodes != "" {
+		nodeContent, err := file.DecodeDecompressString(wf.Status.CompressedNodes)
+		if err != nil {
+			return errors.InternalWrapError(err)
+		}
+		err = json.Unmarshal([]byte(nodeContent), &wf.Status.Nodes)
+		if err != nil {
+			log.Fatal(err)
+		}
+		wf.Status.CompressedNodes = ""
+	}
+	return nil
 }
 
 func printWorkflow(wf *wfv1.Workflow, outFmt string) {
