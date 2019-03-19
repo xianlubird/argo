@@ -75,6 +75,7 @@ const maxOperationTime time.Duration = 10 * time.Second
 
 //maxWorkflowSize is the maximum  size for workflow.yaml
 const maxWorkflowSize int = 1024 * 1024
+const beginCompressSize int = 512 * 1024
 
 // newWorkflowOperationCtx creates and initializes a new wfOperationCtx object.
 func newWorkflowOperationCtx(wf *wfv1.Workflow, wfc *WorkflowController) *wfOperationCtx {
@@ -1596,7 +1597,7 @@ func (woc *wfOperationCtx) getSize() int {
 // The compressed content will be assign to compressedNodes element and clear the nodestatus map.
 func (woc *wfOperationCtx) checkAndCompress() error {
 
-	if woc.wf.Status.CompressedNodes != "" || (woc.wf.Status.CompressedNodes == "" && woc.getSize() >= maxWorkflowSize) {
+	if woc.wf.Status.CompressedNodes != "" || (woc.wf.Status.CompressedNodes == "" && woc.getSize() >= beginCompressSize) {
 
 		nodeContent, err := json.Marshal(woc.wf.Status.Nodes)
 		if err != nil {
@@ -1606,7 +1607,7 @@ func (woc *wfOperationCtx) checkAndCompress() error {
 		woc.wf.Status.CompressedNodes = file.CompressEncodeString(buff)
 
 	}
-	if woc.wf.Status.CompressedNodes != "" && woc.getSize() >= maxWorkflowSize {
+	if woc.wf.Status.CompressedNodes != "" && woc.getSize() >= 8 * maxWorkflowSize {
 		return errors.InternalError(fmt.Sprintf("Workflow is longer than maximum allowed size. Size=%d", woc.getSize()))
 	}
 	return nil
