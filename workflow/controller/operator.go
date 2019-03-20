@@ -13,7 +13,7 @@ import (
 
 	argokubeerr "github.com/argoproj/pkg/kube/errors"
 	"github.com/argoproj/pkg/strftime"
-	jsonpatch "github.com/evanphx/json-patch"
+	"github.com/evanphx/json-patch"
 	log "github.com/sirupsen/logrus"
 	"github.com/valyala/fasttemplate"
 	apiv1 "k8s.io/api/core/v1"
@@ -71,11 +71,11 @@ var (
 
 // maxOperationTime is the maximum time a workflow operation is allowed to run
 // for before requeuing the workflow onto the workqueue.
-const maxOperationTime time.Duration = 10 * time.Second
+const maxOperationTime time.Duration = 10 * time.Minute
 
 //maxWorkflowSize is the maximum  size for workflow.yaml
 const maxWorkflowSize int = 1024 * 1024
-const beginCompressSize int = 512 * 1024
+const beginCompressSize int = 500 * 1024
 
 // newWorkflowOperationCtx creates and initializes a new wfOperationCtx object.
 func newWorkflowOperationCtx(wf *wfv1.Workflow, wfc *WorkflowController) *wfOperationCtx {
@@ -451,6 +451,11 @@ func (woc *wfOperationCtx) podReconciliation() error {
 				woc.updated = true
 			}
 			if woc.wf.Status.Nodes[pod.ObjectMeta.Name].Completed() {
+				if tmpVal, tmpOk := pod.Labels[common.LabelKeyCompleted]; tmpOk {
+					if tmpVal == "true" {
+						return
+					}
+				}
 				woc.completedPods[pod.ObjectMeta.Name] = true
 			}
 		}
@@ -1607,7 +1612,7 @@ func (woc *wfOperationCtx) checkAndCompress() error {
 		woc.wf.Status.CompressedNodes = file.CompressEncodeString(buff)
 
 	}
-	if woc.wf.Status.CompressedNodes != "" && woc.getSize() >= 8 * maxWorkflowSize {
+	if woc.wf.Status.CompressedNodes != "" && woc.getSize() >= 8*maxWorkflowSize {
 		return errors.InternalError(fmt.Sprintf("Workflow is longer than maximum allowed size. Size=%d", woc.getSize()))
 	}
 	return nil
