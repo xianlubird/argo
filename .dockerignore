@@ -3,3 +3,4 @@
 !manifests
 dist/pkg
 !Gopkg.*
+dist

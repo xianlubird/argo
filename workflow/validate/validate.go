@@ -10,6 +10,7 @@ import (
 
 	"github.com/argoproj/argo/errors"
 	wfv1 "github.com/argoproj/argo/pkg/apis/workflow/v1alpha1"
+	"github.com/argoproj/argo/workflow/artifacts/hdfs"
 	"github.com/argoproj/argo/workflow/common"
 	"github.com/valyala/fasttemplate"
 	apivalidation "k8s.io/apimachinery/pkg/util/validation"
@@ -132,6 +133,12 @@ func (ctx *wfValidationCtx) validateTemplate(tmpl *wfv1.Template, args wfv1.Argu
 	if err != nil {
 		return err
 	}
+	if tmpl.ArchiveLocation != nil {
+		err = validateArtifactLocation("templates.archiveLocation", *tmpl.ArchiveLocation)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -183,7 +190,7 @@ func validateInputs(tmpl *wfv1.Template) (map[string]interface{}, error) {
 			return nil, errors.Errorf(errors.CodeBadRequest, "templates.%s.%s.from not valid in inputs", tmpl.Name, artRef)
 		}
 		errPrefix := fmt.Sprintf("templates.%s.%s", tmpl.Name, artRef)
-		err = validateArtifactLocation(errPrefix, art)
+		err = validateArtifactLocation(errPrefix, art.ArtifactLocation)
 		if err != nil {
 			return nil, err
 		}
@@ -191,10 +198,16 @@ func validateInputs(tmpl *wfv1.Template) (map[string]interface{}, error) {
 	return scope, nil
 }
 
-func validateArtifactLocation(errPrefix string, art wfv1.Artifact) error {
+func validateArtifactLocation(errPrefix string, art wfv1.ArtifactLocation) error {
 	if art.Git != nil {
 		if art.Git.Repo == "" {
 			return errors.Errorf(errors.CodeBadRequest, "%s.git.repo is required", errPrefix)
+		}
+	}
+	if art.HDFS != nil {
+		err := hdfs.ValidateArtifact(fmt.Sprintf("%s.hdfs", errPrefix), art.HDFS)
+		if err != nil {
+			return err
 		}
 	}
 	// TODO: validate other artifact locations

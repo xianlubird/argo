@@ -132,13 +132,14 @@ func IsWorkflowCompleted(wf *wfv1.Workflow) bool {
 
 // SubmitOpts are workflow submission options
 type SubmitOpts struct {
-	Name           string   // --name
-	GenerateName   string   // --generate-name
-	InstanceID     string   // --instanceid
-	Entrypoint     string   // --entrypoint
-	Parameters     []string // --parameter
-	ParameterFile  string   // --parameter-file
-	ServiceAccount string   // --serviceaccount
+	Name           string                 // --name
+	GenerateName   string                 // --generate-name
+	InstanceID     string                 // --instanceid
+	Entrypoint     string                 // --entrypoint
+	Parameters     []string               // --parameter
+	ParameterFile  string                 // --parameter-file
+	ServiceAccount string                 // --serviceaccount
+	OwnerReference *metav1.OwnerReference // useful if your custom controller creates argo workflow resources
 }
 
 // SubmitWorkflow validates and submit a single workflow and override some of the fields of the workflow
@@ -235,6 +236,10 @@ func SubmitWorkflow(wfIf v1alpha1.WorkflowInterface, wf *wfv1.Workflow, opts *Su
 	}
 
 	common.ReplaceTemplateName(wf)
+	if opts.OwnerReference != nil {
+		wf.SetOwnerReferences(append(wf.GetOwnerReferences(), *opts.OwnerReference))
+	}
+
 	err := validate.ValidateWorkflow(wf)
 	if err != nil {
 		return nil, err

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"strings"
 
 	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -117,6 +118,17 @@ type WorkflowSpec struct {
 	// More info: https://kubernetes.io/docs/concepts/containers/images/#specifying-imagepullsecrets-on-a-pod
 	ImagePullSecrets []apiv1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
 
+	// Host networking requested for this workflow pod. Default to false.
+	HostNetwork *bool `json:"hostNetwork,omitempty"`
+
+	// Set DNS policy for the pod.
+	// Defaults to "ClusterFirst".
+	// Valid values are 'ClusterFirstWithHostNet', 'ClusterFirst', 'Default' or 'None'.
+	// DNS parameters given in DNSConfig will be merged with the policy selected with DNSPolicy.
+	// To have DNS options set along with hostNetwork, you have to specify DNS policy
+	// explicitly to 'ClusterFirstWithHostNet'.
+	DNSPolicy *apiv1.DNSPolicy `json:"dnsPolicy,omitempty"`
+
 	// OnExit is a template reference which is invoked at the end of the
 	// workflow, irrespective of the success, failure, or error of the
 	// primary workflow.
@@ -133,8 +145,21 @@ type WorkflowSpec struct {
 	// allowed to run before the controller terminates the workflow. A value of zero is used to
 	// terminate a Running workflow
 	ActiveDeadlineSeconds *int64 `json:"activeDeadlineSeconds,omitempty"`
+
 	// Priority is used if controller is configured to process limited number of workflows in parallel. Workflows with higher priority are processed first.
 	Priority *int32 `json:"priority,omitempty"`
+
+	// Set scheduler name for all pods.
+	// Will be overridden if container/script template's scheduler name is set.
+	// Default scheduler will be used if neither specified.
+	// +optional
+	SchedulerName string `json:"schedulerName,omitempty"`
+
+	// PriorityClassName to apply to workflow pods.
+	PodPriorityClassName string `json:"podPriorityClassName,omitempty"`
+
+	// Priority to apply to workflow pods.
+	PodPriority *int32 `json:"podPriority,omitempty"`
 }
 
 // Template is a reusable and composable unit of execution in a workflow
@@ -209,6 +234,17 @@ type Template struct {
 	// SecurityContext holds pod-level security attributes and common container settings.
 	// +optional
 	SecurityContext *apiv1.PodSecurityContext `json:"securityContext,omitempty"`
+	// If specified, the pod will be dispatched by specified scheduler.
+	// Or it will be dispatched by workflow scope scheduler if specified.
+	// If neither specified, the pod will be dispatched by default scheduler.
+	// +optional
+	SchedulerName string `json:"schedulerName,omitempty"`
+
+	// PriorityClassName to apply to workflow pods.
+	PriorityClassName string `json:"priorityClassName,omitempty"`
+
+	// Priority to apply to workflow pods.
+	Priority *int32 `json:"priority,omitempty"`
 }
 
 // Inputs are the mechanism for passing parameters, artifacts, volumes from one template to another
@@ -322,6 +358,9 @@ type ArtifactLocation struct {
 	// Artifactory contains artifactory artifact location details
 	Artifactory *ArtifactoryArtifact `json:"artifactory,omitempty"`
 
+	// HDFS contains HDFS artifact location details
+	HDFS *HDFSArtifact `json:"hdfs,omitempty"`
+
 	// Raw contains raw artifact location details
 	Raw *RawArtifact `json:"raw,omitempty"`
 }
@@ -361,6 +400,10 @@ type WorkflowStep struct {
 
 	// When is an expression in which the step should conditionally execute
 	When string `json:"when,omitempty"`
+
+	// ContinueOn makes argo to proceed with the following step even if this step fails.
+	// Errors and Failed states can be specified
+	ContinueOn *ContinueOn `json:"continueOn,omitempty"`
 }
 
 // Item expands a single workflow step into multiple parallel steps
@@ -553,7 +596,7 @@ func (ws *WorkflowStatus) Completed() bool {
 
 // Remove returns whether or not the node has completed execution
 func (n NodeStatus) Completed() bool {
-	return isCompletedPhase(n.Phase)
+	return isCompletedPhase(n.Phase) || n.IsDaemoned() && n.Phase != NodePending
 }
 
 // IsDaemoned returns whether or not the node is deamoned
@@ -566,7 +609,7 @@ func (n NodeStatus) IsDaemoned() bool {
 
 // Successful returns whether or not this node completed successfully
 func (n NodeStatus) Successful() bool {
-	return n.Phase == NodeSucceeded || n.Phase == NodeSkipped
+	return n.Phase == NodeSucceeded || n.Phase == NodeSkipped || n.IsDaemoned() && n.Phase != NodePending
 }
 
 // CanRetry returns whether the node should be retried or not.
@@ -625,8 +668,12 @@ type GitArtifact struct {
 
 	// PasswordSecret is the secret selector to the repository password
 	PasswordSecret *apiv1.SecretKeySelector `json:"passwordSecret,omitempty"`
+
 	// SSHPrivateKeySecret is the secret selector to the repository ssh private key
 	SSHPrivateKeySecret *apiv1.SecretKeySelector `json:"sshPrivateKeySecret,omitempty"`
+
+	// InsecureIgnoreHostKey disables SSH strict host key checking during git clone
+	InsecureIgnoreHostKey bool `json:"insecureIgnoreHostKey,omitempty"`
 }
 
 // ArtifactoryAuth describes the secret selectors required for authenticating to artifactory
@@ -647,6 +694,68 @@ type ArtifactoryArtifact struct {
 
 func (a *ArtifactoryArtifact) String() string {
 	return a.URL
+}
+
+// HDFSArtifact is the location of an HDFS artifact
+type HDFSArtifact struct {
+	HDFSConfig `json:",inline"`
+
+	// Path is a file path in HDFS
+	Path string `json:"path"`
+
+	// Force copies a file forcibly even if it exists (default: false)
+	Force bool `json:"force,omitempty"`
+}
+
+// HDFSConfig is configurations for HDFS
+type HDFSConfig struct {
+	HDFSKrbConfig `json:",inline"`
+
+	// Addresses is accessible addresses of HDFS name nodes
+	Addresses []string `json:"addresses"`
+
+	// HDFSUser is the user to access HDFS file system.
+	// It is ignored if either ccache or keytab is used.
+	HDFSUser string `json:"hdfsUser,omitempty"`
+}
+
+// HDFSKrbConfig is auth configurations for Kerberos
+type HDFSKrbConfig struct {
+	// KrbCCacheSecret is the secret selector for Kerberos ccache
+	// Either ccache or keytab can be set to use Kerberos.
+	KrbCCacheSecret *apiv1.SecretKeySelector `json:"krbCCacheSecret,omitempty"`
+
+	// KrbKeytabSecret is the secret selector for Kerberos keytab
+	// Either ccache or keytab can be set to use Kerberos.
+	KrbKeytabSecret *apiv1.SecretKeySelector `json:"krbKeytabSecret,omitempty"`
+
+	// KrbUsername is the Kerberos username used with Kerberos keytab
+	// It must be set if keytab is used.
+	KrbUsername string `json:"krbUsername,omitempty"`
+
+	// KrbRealm is the Kerberos realm used with Kerberos keytab
+	// It must be set if keytab is used.
+	KrbRealm string `json:"krbRealm,omitempty"`
+
+	// KrbConfig is the configmap selector for Kerberos config as string
+	// It must be set if either ccache or keytab is used.
+	KrbConfigConfigMap *apiv1.ConfigMapKeySelector `json:"krbConfigConfigMap,omitempty"`
+
+	// KrbServicePrincipalName is the principal name of Kerberos service
+	// It must be set if either ccache or keytab is used.
+	KrbServicePrincipalName string `json:"krbServicePrincipalName,omitempty"`
+}
+
+func (a *HDFSArtifact) String() string {
+	var cred string
+	if a.HDFSUser != "" {
+		cred = fmt.Sprintf("HDFS user %s", a.HDFSUser)
+	} else if a.KrbCCacheSecret != nil {
+		cred = fmt.Sprintf("ccache %v", a.KrbCCacheSecret.Name)
+	} else if a.KrbKeytabSecret != nil {
+		cred = fmt.Sprintf("keytab %v (%s/%s)", a.KrbKeytabSecret.Name, a.KrbUsername, a.KrbRealm)
+	}
+	return fmt.Sprintf("hdfs://%s/%s with %s", strings.Join(a.Addresses, ", "), a.Path, cred)
 }
 
 // RawArtifact allows raw string content to be placed as an artifact in a container
@@ -763,6 +872,10 @@ type DAGTask struct {
 
 	// When is an expression in which the task should conditionally execute
 	When string `json:"when,omitempty"`
+
+	// ContinueOn makes argo to proceed with the following step even if this step fails.
+	// Errors and Failed states can be specified
+	ContinueOn *ContinueOn `json:"continueOn,omitempty"`
 }
 
 // SuspendTemplate is a template subtype to suspend a workflow at a predetermined point in time
@@ -836,7 +949,7 @@ func (args *Arguments) GetParameterByName(name string) *Parameter {
 
 // HasLocation whether or not an artifact has a location defined
 func (a *Artifact) HasLocation() bool {
-	return a.S3 != nil || a.Git != nil || a.HTTP != nil || a.Artifactory != nil || a.Raw != nil
+	return a.S3 != nil || a.Git != nil || a.HTTP != nil || a.Artifactory != nil || a.Raw != nil || a.HDFS != nil
 }
 
 // GetTemplate retrieves a defined template by its name
@@ -857,4 +970,36 @@ func (wf *Workflow) NodeID(name string) string {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(name))
 	return fmt.Sprintf("%s-%v", wf.ObjectMeta.Name, h.Sum32())
+}
+
+// ContinueOn defines if a workflow should continue even if a task or step fails/errors.
+// It can be specified if the workflow should continue when the pod errors, fails or both.
+type ContinueOn struct {
+	// +optional
+	Error bool `json:"error,omitempty"`
+	// +optional
+	Failed bool `json:"failed,omitempty"`
+}
+
+func continues(c *ContinueOn, phase NodePhase) bool {
+	if c == nil {
+		return false
+	}
+	if c.Error == true && phase == NodeError {
+		return true
+	}
+	if c.Failed == true && phase == NodeFailed {
+		return true
+	}
+	return false
+}
+
+// ContinuesOn returns whether the DAG should be proceeded if the task fails or errors.
+func (t *DAGTask) ContinuesOn(phase NodePhase) bool {
+	return continues(t.ContinueOn, phase)
+}
+
+// ContinuesOn returns whether the StepGroup should be proceeded if the task fails or errors.
+func (s *WorkflowStep) ContinuesOn(phase NodePhase) bool {
+	return continues(s.ContinueOn, phase)
 }

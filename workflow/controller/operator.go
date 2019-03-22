@@ -108,7 +108,12 @@ func newWorkflowOperationCtx(wf *wfv1.Workflow, wfc *WorkflowController) *wfOper
 // TODO: an error returned by this method should result in requeuing the workflow to be retried at a
 // later time
 func (woc *wfOperationCtx) operate() {
-	defer woc.persistUpdates()
+	defer func() {
+		if woc.wf.Status.Completed() {
+			_ = woc.killDaemonedChildren("")
+		}
+		woc.persistUpdates()
+	}()
 	defer func() {
 		if r := recover(); r != nil {
 			if rerr, ok := r.(error); ok {
@@ -450,7 +455,8 @@ func (woc *wfOperationCtx) podReconciliation() error {
 				woc.addOutputsToScope("workflow", node.Outputs, nil)
 				woc.updated = true
 			}
-			if woc.wf.Status.Nodes[pod.ObjectMeta.Name].Completed() {
+			node := woc.wf.Status.Nodes[pod.ObjectMeta.Name]
+			if node.Completed() && !node.IsDaemoned() {
 				if tmpVal, tmpOk := pod.Labels[common.LabelKeyCompleted]; tmpOk {
 					if tmpVal == "true" {
 						return
@@ -582,7 +588,12 @@ func assessNodeStatus(pod *apiv1.Pod, node *wfv1.NodeStatus) *wfv1.NodeStatus {
 		newPhase = wfv1.NodeSucceeded
 		newDaemonStatus = &f
 	case apiv1.PodFailed:
-		newPhase, message = inferFailedReason(pod)
+		// ignore pod failure for daemoned steps
+		if node.IsDaemoned() {
+			newPhase = wfv1.NodeSucceeded
+		} else {
+			newPhase, message = inferFailedReason(pod)
+		}
 		newDaemonStatus = &f
 	case apiv1.PodRunning:
 		newPhase = wfv1.NodeRunning
@@ -604,8 +615,8 @@ func assessNodeStatus(pod *apiv1.Pod, node *wfv1.NodeStatus) *wfv1.NodeStatus {
 					return nil
 				}
 			}
-			// proceed to mark node status as succeeded (and daemoned)
-			newPhase = wfv1.NodeSucceeded
+			// proceed to mark node status as running (and daemoned)
+			newPhase = wfv1.NodeRunning
 			t := true
 			newDaemonStatus = &t
 			log.Infof("Processing ready daemon pod: %v", pod.ObjectMeta.SelfLink)
@@ -1051,7 +1062,8 @@ func (woc *wfOperationCtx) markWorkflowPhase(phase wfv1.NodePhase, markCompleted
 
 	switch phase {
 	case wfv1.NodeSucceeded, wfv1.NodeFailed, wfv1.NodeError:
-		if markCompleted {
+		// wait for all daemon nodes to get terminated before marking workflow completed
+		if markCompleted && !woc.hasDaemonNodes() {
 			woc.log.Infof("Marking workflow completed")
 			woc.wf.Status.FinishedAt = metav1.Time{Time: time.Now().UTC()}
 			if woc.wf.ObjectMeta.Labels == nil {
@@ -1061,6 +1073,15 @@ func (woc *wfOperationCtx) markWorkflowPhase(phase wfv1.NodePhase, markCompleted
 			woc.updated = true
 		}
 	}
+}
+
+func (woc *wfOperationCtx) hasDaemonNodes() bool {
+	for _, node := range woc.wf.Status.Nodes {
+		if node.IsDaemoned() {
+			return true
+		}
+	}
+	return false
 }
 
 func (woc *wfOperationCtx) markWorkflowRunning() {
@@ -1214,8 +1235,17 @@ func (woc *wfOperationCtx) executeContainer(nodeName string, tmpl *wfv1.Template
 func (woc *wfOperationCtx) getOutboundNodes(nodeID string) []string {
 	node := woc.wf.Status.Nodes[nodeID]
 	switch node.Type {
-	case wfv1.NodeTypePod, wfv1.NodeTypeSkipped, wfv1.NodeTypeSuspend, wfv1.NodeTypeTaskGroup:
+	case wfv1.NodeTypePod, wfv1.NodeTypeSkipped, wfv1.NodeTypeSuspend:
 		return []string{node.ID}
+	case wfv1.NodeTypeTaskGroup:
+		if len(node.Children) == 0 {
+			return []string{node.ID}
+		}
+		outboundNodes := make([]string, 0)
+		for _, child := range node.Children {
+			outboundNodes = append(outboundNodes, woc.getOutboundNodes(child)...)
+		}
+		return outboundNodes
 	case wfv1.NodeTypeRetry:
 		numChildren := len(node.Children)
 		if numChildren > 0 {
@@ -1315,7 +1345,7 @@ func (woc *wfOperationCtx) addOutputsToScope(prefix string, outputs *wfv1.Output
 		if scope != nil {
 			scope.addArtifactToScope(key, art)
 		}
-		woc.addArtifactToGlobalScope(art)
+		woc.addArtifactToGlobalScope(art, scope)
 	}
 }
 
@@ -1422,7 +1452,7 @@ func (woc *wfOperationCtx) addParamToGlobalScope(param wfv1.Parameter) {
 
 // addArtifactToGlobalScope exports any desired node outputs to the global scope
 // Optionally adds to a local scope if supplied
-func (woc *wfOperationCtx) addArtifactToGlobalScope(art wfv1.Artifact) {
+func (woc *wfOperationCtx) addArtifactToGlobalScope(art wfv1.Artifact, scope *wfScope) {
 	if art.GlobalName == "" {
 		return
 	}
@@ -1436,6 +1466,9 @@ func (woc *wfOperationCtx) addArtifactToGlobalScope(art wfv1.Artifact) {
 				art.Path = ""
 				if !reflect.DeepEqual(woc.wf.Status.Outputs.Artifacts[i], art) {
 					woc.wf.Status.Outputs.Artifacts[i] = art
+					if scope != nil {
+						scope.addArtifactToScope(globalArtName, art)
+					}
 					woc.log.Infof("overwriting %s: %v", globalArtName, art)
 					woc.updated = true
 				}
@@ -1451,6 +1484,9 @@ func (woc *wfOperationCtx) addArtifactToGlobalScope(art wfv1.Artifact) {
 	art.Path = ""
 	woc.log.Infof("setting %s: %v", globalArtName, art)
 	woc.wf.Status.Outputs.Artifacts = append(woc.wf.Status.Outputs.Artifacts, art)
+	if scope != nil {
+		scope.addArtifactToScope(globalArtName, art)
+	}
 	woc.updated = true
 }
 
@@ -1481,9 +1517,10 @@ func (woc *wfOperationCtx) executeResource(nodeName string, tmpl *wfv1.Template,
 		return node
 	}
 	mainCtr := apiv1.Container{
-		Image:   woc.controller.executorImage(),
-		Command: []string{"argoexec"},
-		Args:    []string{"resource", tmpl.Resource.Action},
+		Image:           woc.controller.executorImage(),
+		ImagePullPolicy: woc.controller.executorImagePullPolicy(),
+		Command:         []string{"argoexec"},
+		Args:            []string{"resource", tmpl.Resource.Action},
 		VolumeMounts: []apiv1.VolumeMount{
 			volumeMountPodMetadata,
 		},

@@ -30,10 +30,6 @@ const (
 	// PodMetadataAnnotationsPath is the file path containing pod metadata annotations. Examined by executor
 	PodMetadataAnnotationsPath = PodMetadataMountPath + "/" + PodMetadataAnnotationsVolumePath
 
-	// DockerLibVolumeName is the volume name for the /var/lib/docker host path volume
-	DockerLibVolumeName = "docker-lib"
-	// DockerLibHostPath is the host directory path containing docker runtime state
-	DockerLibHostPath = "/var/lib/docker"
 	// DockerSockVolumeName is the volume name for the /var/run/docker.sock host path volume
 	DockerSockVolumeName = "docker-sock"
 
@@ -115,6 +111,9 @@ const (
 	GlobalVarWorkflowCreationTimestamp = "workflow.creationTimestamp"
 	// LocalVarPodName is a step level variable that references the name of the pod
 	LocalVarPodName = "pod.name"
+
+	KubeConfigDefaultMountPath  = "/kube/config"
+	KubeConfigDefaultVolumeName = "kubeconfig"
 )
 
 // ExecutionControl contains execution control parameters for executor to decide how to execute the container
@@ -123,4 +122,10 @@ type ExecutionControl struct {
 	// It is used to signal the executor to terminate a daemoned container. In the future it will be
 	// used to support workflow or steps/dag level timeouts.
 	Deadline *time.Time `json:"deadline,omitempty"`
+}
+
+type ResourceInterface interface {
+	GetNamespace() string
+	GetSecrets(namespace, name, key string) ([]byte, error)
+	GetConfigMapKey(namespace, name, key string) (string, error)
 }
