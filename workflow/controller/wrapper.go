@@ -2,9 +2,13 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"github.com/argoproj/argo/errors"
 	"github.com/argoproj/argo/pkg/apis/workflow/v1alpha1"
+	wfv1 "github.com/argoproj/argo/pkg/apis/workflow/v1alpha1"
 	wfclientset "github.com/argoproj/argo/pkg/client/clientset/versioned"
+	"github.com/argoproj/argo/util/file"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -37,7 +41,9 @@ func (wfc *WorkflowController) ReSyncWorkflow(ctx context.Context) {
 			if wf.Status.Phase != v1alpha1.NodeRunning {
 				continue
 			}
-
+			if tmpErr := wrapperCheckAndDecompress(&wf); tmpErr != nil {
+				log.Error(tmpErr)
+			}
 			checkDagWorkflowStatus(&wf, wfc.wfclientset, wfc.kubeclientset)
 		}
 
@@ -97,6 +103,9 @@ func checkDagWorkflowStatus(wf *v1alpha1.Workflow, argoClient wfclientset.Interf
 	wf.Status.Nodes[targetNode[0].ID] = dagNode
 	wf.Status.Phase = v1alpha1.NodeFailed
 
+	if tmpErr := wrapperCheckAndCompress(wf); tmpErr != nil {
+		log.Error(tmpErr)
+	}
 	_, err := argoClient.ArgoprojV1alpha1().Workflows(wf.Namespace).Update(wf)
 	if err != nil {
 		log.Errorf("Update workflow %s:%s error %v", wf.Namespace, wf.Name, err)
@@ -134,4 +143,34 @@ func checkDagWorkflowStatus(wf *v1alpha1.Workflow, argoClient wfclientset.Interf
 			log.Errorf("Retry workflow %s error %v", wf.Name, tmpErr)
 		}
 	*/
+}
+
+func wrapperCheckAndDecompress(wf *wfv1.Workflow) error {
+	if wf.Status.CompressedNodes != "" {
+		nodeContent, err := file.DecodeDecompressString(wf.Status.CompressedNodes)
+		if err != nil {
+			return err
+		}
+		err = json.Unmarshal([]byte(nodeContent), &wf.Status.Nodes)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func wrapperCheckAndCompress(wf *wfv1.Workflow) error {
+
+	if wf.Status.CompressedNodes != "" {
+
+		nodeContent, err := json.Marshal(wf.Status.Nodes)
+		if err != nil {
+			return errors.InternalWrapError(err)
+		}
+		buff := string(nodeContent)
+		wf.Status.CompressedNodes = file.CompressEncodeString(buff)
+		wf.Status.Nodes = nil
+	}
+
+	return nil
 }
