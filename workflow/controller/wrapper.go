@@ -37,14 +37,23 @@ func (wfc *WorkflowController) ReSyncWorkflow(ctx context.Context) {
 			continue
 		}
 
+		conditionTimes := 2
+
 		for _, wf := range allWfObjList.Items {
 			if wf.Status.Phase != v1alpha1.NodeRunning {
 				continue
 			}
+
+			if wrapperGetSize(&wf) >= 500 * 1024 {
+				conditionTimes = 60
+			} else {
+				conditionTimes = 2
+			}
+
 			if tmpErr := wrapperCheckAndDecompress(&wf); tmpErr != nil {
 				log.Error(tmpErr)
 			}
-			checkDagWorkflowStatus(&wf, wfc.wfclientset, wfc.kubeclientset)
+			checkDagWorkflowStatus(&wf, wfc.wfclientset, wfc.kubeclientset, conditionTimes)
 		}
 
 		time.Sleep(1 * time.Minute)
@@ -52,7 +61,8 @@ func (wfc *WorkflowController) ReSyncWorkflow(ctx context.Context) {
 
 }
 
-func checkDagWorkflowStatus(wf *v1alpha1.Workflow, argoClient wfclientset.Interface, kubeClient kubernetes.Interface) {
+func checkDagWorkflowStatus(wf *v1alpha1.Workflow, argoClient wfclientset.Interface, kubeClient kubernetes.Interface,
+	conditionTimes int) {
 	if wf == nil {
 		return
 	}
@@ -88,7 +98,7 @@ func checkDagWorkflowStatus(wf *v1alpha1.Workflow, argoClient wfclientset.Interf
 
 	mapKey := fmt.Sprintf("%s-%s", wf.Namespace, wf.Name)
 	if val, ok := workflowRecordLimitMap[mapKey]; ok {
-		if val < 2 {
+		if val < conditionTimes {
 			workflowRecordLimitMap[mapKey] += 1
 			return
 		}
@@ -173,4 +183,23 @@ func wrapperCheckAndCompress(wf *wfv1.Workflow) error {
 	}
 
 	return nil
+}
+
+// getSize return the entire workflow json string size
+func wrapperGetSize(wf *wfv1.Workflow) int {
+	nodeContent, err := json.Marshal(wf)
+	if err != nil {
+		return -1
+	}
+
+	compressNodeSize := len(wf.Status.CompressedNodes)
+
+	if compressNodeSize > 0 {
+		nodeStatus, err := json.Marshal(wf.Status.Nodes)
+		if err != nil {
+			return -1
+		}
+		return len(nodeContent) - len(nodeStatus)
+	}
+	return len(nodeContent)
 }
