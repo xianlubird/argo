@@ -266,9 +266,6 @@ func (woc *wfOperationCtx) newInitContainer(tmpl *wfv1.Template) apiv1.Container
 
 func (woc *wfOperationCtx) newWaitContainer(tmpl *wfv1.Template) (*apiv1.Container, error) {
 	ctr := woc.newExecContainer(common.WaitContainerName, false, "wait")
-	ctr.Command = []string{"argoexec"}
-	ctr.Args = []string{"wait"}
-	ctr.VolumeMounts = woc.createVolumeMounts()
 	if woc.useNonRootExec(tmpl) {
 		permissionInt := int64(common.NonrootArgoExecUid)
 		if ctr.SecurityContext != nil {
@@ -284,7 +281,6 @@ func (woc *wfOperationCtx) newWaitContainer(tmpl *wfv1.Template) (*apiv1.Contain
 		ctr.Command = []string{"/bin/exec.sh"}
 		ctr.Args = []string{}
 	}
-
 	ctr.VolumeMounts = append(woc.createVolumeMounts(), ctr.VolumeMounts...)
 	return ctr, nil
 }
