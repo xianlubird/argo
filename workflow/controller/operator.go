@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	argokubeerr "github.com/argoproj/pkg/kube/errors"
@@ -136,7 +137,9 @@ func (woc *wfOperationCtx) operate() {
 		woc.workflowDeadline = woc.getWorkflowDeadline()
 	} else {
 		woc.workflowDeadline = woc.getWorkflowDeadline()
+		woc.log.Infof("podReconciliation beigin %++v", time.Now())
 		err := woc.podReconciliation()
+		woc.log.Infof("podReconciliation finish %++v", time.Now())
 		if err != nil {
 			woc.log.Errorf("%s error: %+v", woc.wf.ObjectMeta.Name, err)
 			// TODO: we need to re-add to the workqueue, but should happen in caller
@@ -439,16 +442,28 @@ func (woc *wfOperationCtx) processNodeRetries(node *wfv1.NodeStatus, retryStrate
 // Records all pods which were observed completed, which will be labeled completed=true
 // after successful persist of the workflow.
 func (woc *wfOperationCtx) podReconciliation() error {
+	woc.log.Infof("getAllWorkflowPods begin %++v", time.Now())
 	podList, err := woc.getAllWorkflowPods()
+	woc.log.Infof("getAllWorkflowPods finish %++v", time.Now())
 	if err != nil {
 		return err
 	}
 	seenPods := make(map[string]bool)
+	seenPodLock := &sync.Mutex{}
+	wfNodesLock := &sync.RWMutex{}
 
 	performAssessment := func(pod *apiv1.Pod) {
+		if pod == nil {
+			return
+		}
 		nodeNameForPod := pod.Annotations[common.AnnotationKeyNodeName]
 		nodeID := woc.wf.NodeID(nodeNameForPod)
+		seenPodLock.Lock()
 		seenPods[nodeID] = true
+		seenPodLock.Unlock()
+
+		wfNodesLock.Lock()
+		defer wfNodesLock.Unlock()
 		if node, ok := woc.wf.Status.Nodes[nodeID]; ok {
 			if newState := assessNodeStatus(pod, &node); newState != nil {
 				woc.wf.Status.Nodes[nodeID] = *newState
@@ -467,27 +482,25 @@ func (woc *wfOperationCtx) podReconciliation() error {
 		}
 	}
 
+	woc.log.Infof("podList.Items begin %++v", time.Now())
+	parallelPodNum := make(chan string, 500)
+	var wg sync.WaitGroup
 	for _, pod := range podList.Items {
-		origNodeStatus := *woc.wf.Status.DeepCopy()
-		performAssessment(&pod)
-		err = woc.applyExecutionControl(&pod)
-		if err != nil {
-			woc.log.Warnf("Failed to apply execution control to pod %s", pod.Name)
-		}
-		err = woc.checkAndCompress()
-		if err != nil {
-			woc.wf.Status = origNodeStatus
-			nodeNameForPod := pod.Annotations[common.AnnotationKeyNodeName]
-			woc.log.Warnf("%v", err)
-			woc.markNodeErrorClearOuput(nodeNameForPod, err)
-			err = woc.checkAndCompress()
+		parallelPodNum <- pod.Name
+		wg.Add(1)
+		go func(tmpPod apiv1.Pod) {
+			defer wg.Done()
+			performAssessment(&tmpPod)
+			err = woc.applyExecutionControl(&tmpPod, wfNodesLock)
 			if err != nil {
-				woc.markWorkflowError(err, true)
+				woc.log.Warnf("Failed to apply execution control to pod %s", pod.Name)
 			}
-		}
-
+			<- parallelPodNum
+		}(pod)
 	}
 
+	wg.Wait()
+	woc.log.Infof("podList.Items finish %++v", time.Now())
 	// Now check for deleted pods. Iterate our nodes. If any one of our nodes does not show up in
 	// the seen list it implies that the pod was deleted without the controller seeing the event.
 	// It is now impossible to infer pod status. The only thing we can do at this point is to mark

@@ -258,7 +258,9 @@ func (wfc *WorkflowController) processNextItem() bool {
 		wfc.throttler.Remove(key)
 		return true
 	}
+	log.Infof("woc.operate() begin %++v", time.Now())
 	woc.operate()
+	log.Infof("woc.operate() finish %++v", time.Now())
 	if woc.wf.Status.Completed() {
 		wfc.throttler.Remove(key)
 	}
