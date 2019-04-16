@@ -25,7 +25,9 @@ var (
 	kubeClient       *kubernetes.Clientset
 	showResUsage     bool
 	showMetrics      bool
+	showSumInfo      bool
 	metricsConfigMap *v1.ConfigMap
+	podStatusSumInfo *PodStatusSum
 )
 
 func NewGetCommand() *cobra.Command {
@@ -51,6 +53,9 @@ func NewGetCommand() *cobra.Command {
 			if showMetrics {
 				metricsConfigMap = getMetricsConfigMap(wf, kubeClient)
 			}
+			if showSumInfo {
+				podStatusSumInfo = CalculateWorkflowPodStatus(wf)
+			}
 			err = CheckAndDecompress(wf)
 			if err != nil {
 				log.Fatal(err)
@@ -63,6 +68,7 @@ func NewGetCommand() *cobra.Command {
 	command.Flags().BoolVar(&noColor, "no-color", false, "Disable colorized output")
 	command.Flags().BoolVar(&showResUsage, "show", false, "Show workflow resource usage")
 	command.Flags().BoolVar(&showMetrics, "metrics", false, "Show workflow metrics usage")
+	command.Flags().BoolVar(&showSumInfo, "sum-info", false, "Show workflow sum info")
 	return command
 }
 
@@ -129,6 +135,24 @@ func printWorkflowHelper(wf *wfv1.Workflow, outFmt string) {
 			cpu, memory := getWorkflowMetrics(metricsConfigMap)
 			fmt.Printf("%-20s %v    (core*hour)\n", "Total CPU:", cpu)
 			fmt.Printf("%-20s %v    (GB*hour)\n", "Total Memory:", memory)
+		}
+	}
+
+	if podStatusSumInfo != nil {
+		if podStatusSumInfo.PendingPodsNum != 0 {
+			fmt.Printf(fmtStr, "PendingPodNum: ", podStatusSumInfo.PendingPodsNum)
+		}
+		if podStatusSumInfo.RunningPodsNum != 0 {
+			fmt.Printf(fmtStr, "RunningPodNum: ", podStatusSumInfo.RunningPodsNum)
+		}
+		if podStatusSumInfo.SucceededPodsNum != 0 {
+			fmt.Printf(fmtStr, "SucceededPodNum: ", podStatusSumInfo.SucceededPodsNum)
+		}
+		if podStatusSumInfo.FailedPodsNum != 0 {
+			fmt.Printf(fmtStr, "FailedPodNum: ", podStatusSumInfo.FailedPodsNum)
+		}
+		if podStatusSumInfo.ErrorPodsNum != 0 {
+			fmt.Printf(fmtStr, "ErrorPodNum: ", podStatusSumInfo.ErrorPodsNum)
 		}
 	}
 

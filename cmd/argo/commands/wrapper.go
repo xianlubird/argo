@@ -241,6 +241,38 @@ func ParseLogFlagFromParent(cmd *cobra.Command) (containerName string, workflow 
 	return
 }
 
-func InitKubeClient() *kubernetes.Clientset {
-	return initKubeClient()
+func CalculateWorkflowPodStatus(wf *wfv1.Workflow) *PodStatusSum {
+	if wf == nil {
+		return nil
+	}
+
+	sumStatus := &PodStatusSum{}
+
+	nodes := wf.Status.Nodes
+	for _, value := range nodes {
+		if value.Type != wfv1.NodeTypePod {
+			continue
+		}
+		switch value.Phase {
+		case wfv1.NodePending:
+			sumStatus.PendingPodsNum++
+		case wfv1.NodeRunning:
+			sumStatus.RunningPodsNum++
+		case wfv1.NodeSucceeded:
+			sumStatus.SucceededPodsNum++
+		case wfv1.NodeFailed:
+			sumStatus.FailedPodsNum++
+		case wfv1.NodeError:
+			sumStatus.ErrorPodsNum++
+		}
+	}
+	return sumStatus
+}
+
+type PodStatusSum struct {
+	PendingPodsNum   int
+	RunningPodsNum   int
+	SucceededPodsNum int
+	FailedPodsNum    int
+	ErrorPodsNum     int
 }
