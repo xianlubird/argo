@@ -140,19 +140,19 @@ func printWorkflowHelper(wf *wfv1.Workflow, outFmt string) {
 
 	if podStatusSumInfo != nil {
 		if podStatusSumInfo.PendingPodsNum != 0 {
-			fmt.Printf(fmtStr, "PendingPodNum: ", podStatusSumInfo.PendingPodsNum)
+			fmt.Printf(fmtStr, "Pending: ", podStatusSumInfo.PendingPodsNum)
 		}
 		if podStatusSumInfo.RunningPodsNum != 0 {
-			fmt.Printf(fmtStr, "RunningPodNum: ", podStatusSumInfo.RunningPodsNum)
+			fmt.Printf(fmtStr, "Running: ", podStatusSumInfo.RunningPodsNum)
 		}
 		if podStatusSumInfo.SucceededPodsNum != 0 {
-			fmt.Printf(fmtStr, "SucceededPodNum: ", podStatusSumInfo.SucceededPodsNum)
+			fmt.Printf(fmtStr, "Succeeded: ", podStatusSumInfo.SucceededPodsNum)
 		}
 		if podStatusSumInfo.FailedPodsNum != 0 {
-			fmt.Printf(fmtStr, "FailedPodNum: ", podStatusSumInfo.FailedPodsNum)
+			fmt.Printf(fmtStr, "Failed: ", podStatusSumInfo.FailedPodsNum)
 		}
 		if podStatusSumInfo.ErrorPodsNum != 0 {
-			fmt.Printf(fmtStr, "ErrorPodNum: ", podStatusSumInfo.ErrorPodsNum)
+			fmt.Printf(fmtStr, "Error: ", podStatusSumInfo.ErrorPodsNum)
 		}
 	}
 
@@ -200,7 +200,7 @@ func printWorkflowHelper(wf *wfv1.Workflow, outFmt string) {
 			if showResUsage {
 				fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tMESSAGE\tCPU(core*hour)\tMEMORY(GB*hour)\n", ansiFormat("STEP", FgDefault))
 			} else if showMetrics {
-				fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tMESSAGE\tCPU(core*hour)\tMEMORY(GB*hour)\tMaxcpu(core)\tMaxMemory(GB)\n",
+				fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tMESSAGE\tCPU(core*hour)\tMEMORY(GB*hour)\tMaxCpu(core)\tMaxMemory(GB)\n",
 					ansiFormat("STEP", FgDefault))
 			} else {
 				fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tMESSAGE\n", ansiFormat("STEP", FgDefault))
