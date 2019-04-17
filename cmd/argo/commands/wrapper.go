@@ -161,40 +161,45 @@ func getCpuMemoryRequest(node wfv1.NodeStatus, namespace string, kubeClient *kub
 	return 0, 0
 }
 
-func getPodMetrics(node wfv1.NodeStatus, metricsConfigMap *v1.ConfigMap) (float64, float64) {
+func getPodMetrics(node wfv1.NodeStatus, metricsConfigMap *v1.ConfigMap) (float64, float64, float64, float64) {
 	if node.Type != wfv1.NodeTypePod {
-		return 0, 0
+		return 0, 0, 0, 0
 	}
 
 	if metricsConfigMap == nil {
-		return 0, 0
+		return 0, 0, 0, 0
 	}
 
 	data := metricsConfigMap.Data
 	var podCpuMetrics float64
 	var podMemoryMetrics float64
+	var podMaxCpu float64
+	var podMaxMemory float64
 
-	if tmpPodCpuStr, ok := data[node.ID+".cpu"]; ok {
-		tmpPodCpuValue, tmpErr := strconv.ParseFloat(tmpPodCpuStr, 64)
-		if tmpErr != nil {
-			log.Warningf("Parse %s to float64 error %v", tmpPodCpuStr, tmpErr)
+	processDataFromConfigMap := func(dataField string) float64 {
+		if tmpPodStr, ok := data[node.ID+"."+dataField]; ok {
+			tmpPodValue, tmpErr := strconv.ParseFloat(tmpPodStr, 64)
+			if tmpErr != nil {
+				log.Warningf("Parse %s to float64 error %v", tmpPodValue, tmpErr)
+				return 0
+			} else {
+				return tmpPodValue
+			}
 		} else {
-			podCpuMetrics = tmpPodCpuValue
+			return 0
 		}
 	}
 
-	if tmpPodMemoryStr, ok := data[node.ID+".memory"]; ok {
-		tmpPodMemoryValue, tmpErr := strconv.ParseFloat(tmpPodMemoryStr, 64)
-		if tmpErr != nil {
-			log.Warningf("Parse %s to float64 error %v", tmpPodMemoryStr, tmpErr)
-		} else {
-			podMemoryMetrics = tmpPodMemoryValue
-		}
-	}
+	podCpuMetrics = processDataFromConfigMap("cpu")
+	podMemoryMetrics = processDataFromConfigMap("memory")
+	podMaxCpu = processDataFromConfigMap("maxCpu")
+	podMaxMemory = processDataFromConfigMap("maxMemory")
 
 	podCpuMetrics /= 1000
+	podMaxCpu /= 1000
 	podMemoryMetrics /= 1024 * 1024 * 1024
-	return Decimal(podCpuMetrics), Decimal(podMemoryMetrics)
+	podMaxMemory /= 1024 * 1024 * 1024
+	return Decimal(podCpuMetrics), Decimal(podMemoryMetrics), Decimal(podMaxCpu), Decimal(podMaxMemory)
 }
 
 func SetClientConfig(client clientcmd.ClientConfig) {

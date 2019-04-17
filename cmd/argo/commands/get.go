@@ -200,7 +200,8 @@ func printWorkflowHelper(wf *wfv1.Workflow, outFmt string) {
 			if showResUsage {
 				fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tMESSAGE\tCPU(core*hour)\tMEMORY(GB*hour)\n", ansiFormat("STEP", FgDefault))
 			} else if showMetrics {
-				fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tMESSAGE\tCPU(core*hour)\tMEMORY(GB*hour)\n", ansiFormat("STEP", FgDefault))
+				fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tMESSAGE\tCPU(core*hour)\tMEMORY(GB*hour)\tMaxcpu(core)\tMaxMemory(GB)\n",
+					ansiFormat("STEP", FgDefault))
 			} else {
 				fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tMESSAGE\n", ansiFormat("STEP", FgDefault))
 			}
@@ -487,8 +488,8 @@ func printNode(w *tabwriter.Writer, wf *wfv1.Workflow, node wfv1.NodeStatus, dep
 			cpu, memory := getCpuMemoryRequest(node, wf.Namespace, kubeClient, wf)
 			args = []interface{}{nodePrefix, nodeName, node.ID, duration, node.Message, cpu, memory}
 		} else if showMetrics {
-			cpu, memory := getPodMetrics(node, metricsConfigMap)
-			args = []interface{}{nodePrefix, nodeName, node.ID, duration, node.Message, cpu, memory}
+			cpu, memory, maxCpu, maxMemory := getPodMetrics(node, metricsConfigMap)
+			args = []interface{}{nodePrefix, nodeName, node.ID, duration, node.Message, cpu, memory, maxCpu, maxMemory}
 		} else {
 			args = []interface{}{nodePrefix, nodeName, node.ID, duration, node.Message}
 		}
@@ -497,7 +498,7 @@ func printNode(w *tabwriter.Writer, wf *wfv1.Workflow, node wfv1.NodeStatus, dep
 		if showResUsage {
 			args = []interface{}{nodePrefix, nodeName, "", "", node.Message, 0.0, 0.0}
 		} else if showMetrics {
-			args = []interface{}{nodePrefix, nodeName, "", "", node.Message, 0.0, 0.0}
+			args = []interface{}{nodePrefix, nodeName, "", "", node.Message, 0.0, 0.0, 0.0, 0.0}
 		} else {
 			args = []interface{}{nodePrefix, nodeName, "", "", node.Message}
 		}
@@ -511,7 +512,7 @@ func printNode(w *tabwriter.Writer, wf *wfv1.Workflow, node wfv1.NodeStatus, dep
 		if showResUsage {
 			fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\t%g\t%g\n", args...)
 		} else if showMetrics {
-			fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\t%g\t%g\n", args...)
+			fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\t%g\t%g\t%g\t%g\n", args...)
 		} else {
 			fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\n", args...)
 		}
