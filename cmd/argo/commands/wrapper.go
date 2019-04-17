@@ -281,3 +281,8 @@ type PodStatusSum struct {
 	FailedPodsNum    int
 	ErrorPodsNum     int
 }
+
+//Do not remove, it's used for ags cli
+func InitKubeClient() *kubernetes.Clientset {
+	return initKubeClient()
+}
