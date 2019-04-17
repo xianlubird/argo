@@ -28,6 +28,7 @@ var (
 	showSumInfo      bool
 	metricsConfigMap *v1.ConfigMap
 	podStatusSumInfo *PodStatusSum
+	status        string // --status
 )
 
 func NewGetCommand() *cobra.Command {
@@ -69,6 +70,7 @@ func NewGetCommand() *cobra.Command {
 	command.Flags().BoolVar(&showResUsage, "show", false, "Show workflow resource usage")
 	command.Flags().BoolVar(&showMetrics, "metrics", false, "Show workflow metrics usage")
 	command.Flags().BoolVar(&showSumInfo, "sum-info", false, "Show workflow sum info")
+	command.Flags().StringVar(&status, "status", "", "Filter by status (Pending, Running, Succeeded, Skipped, Failed, Error)")
 	return command
 }
 
@@ -484,6 +486,9 @@ func printNode(w *tabwriter.Writer, wf *wfv1.Workflow, node wfv1.NodeStatus, dep
 	var args []interface{}
 	duration := humanize.RelativeDurationShort(node.StartedAt.Time, node.FinishedAt.Time)
 	if node.Type == wfv1.NodeTypePod {
+		if status != "" && string(node.Phase) != status {
+			return
+		}
 		if showResUsage {
 			cpu, memory := getCpuMemoryRequest(node, wf.Namespace, kubeClient, wf)
 			args = []interface{}{nodePrefix, nodeName, node.ID, duration, node.Message, cpu, memory}
