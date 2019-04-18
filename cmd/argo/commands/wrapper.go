@@ -6,6 +6,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -38,7 +39,7 @@ func NewTopCommand() *cobra.Command {
 
 func getMetricsConfigMap(wf *wfv1.Workflow, kubeClient *kubernetes.Clientset) *v1.ConfigMap {
 	cm, err := kubeClient.CoreV1().ConfigMaps(wf.Namespace).Get(wf.Name, metav1.GetOptions{})
-	if err != nil {
+	if err != nil && !errors.IsNotFound(err){
 		log.Warningf("getMetricsConfigMap error %v", err)
 		return nil
 	}
@@ -48,7 +49,6 @@ func getMetricsConfigMap(wf *wfv1.Workflow, kubeClient *kubernetes.Clientset) *v
 
 func getWorkflowMetrics(metricsConfigMap *v1.ConfigMap) (float64, float64) {
 	if metricsConfigMap == nil {
-		log.Warningf("metricsConfigMap is nil")
 		return 0, 0
 	}
 	data := metricsConfigMap.Data
