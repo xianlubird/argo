@@ -180,7 +180,7 @@ func getPodMetrics(node wfv1.NodeStatus, metricsConfigMap *v1.ConfigMap) (float6
 		if tmpPodStr, ok := data[node.ID+"."+dataField]; ok {
 			tmpPodValue, tmpErr := strconv.ParseFloat(tmpPodStr, 64)
 			if tmpErr != nil {
-				log.Warningf("Parse %s to float64 error %v", tmpPodValue, tmpErr)
+				log.Warningf("Parse %f to float64 error %v", tmpPodValue, tmpErr)
 				return 0
 			} else {
 				return tmpPodValue
