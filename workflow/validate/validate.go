@@ -8,16 +8,33 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/ghodss/yaml"
+	"github.com/valyala/fasttemplate"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	apivalidation "k8s.io/apimachinery/pkg/util/validation"
+
 	"github.com/argoproj/argo/errors"
 	wfv1 "github.com/argoproj/argo/pkg/apis/workflow/v1alpha1"
 	"github.com/argoproj/argo/workflow/artifacts/hdfs"
 	"github.com/argoproj/argo/workflow/common"
-	"github.com/valyala/fasttemplate"
-	apivalidation "k8s.io/apimachinery/pkg/util/validation"
 )
+
+// ValidateOpts provides options when linting
+type ValidateOpts struct {
+	// Lint indicates if this is performing validation in the context of linting. If true, will
+	// skip some validations which is permissible during linting but not submission (e.g. missing
+	// input parameters to the workflow)
+	Lint bool
+	// ContainerRuntimeExecutor will trigger additional validation checks specific to different
+	// types of executors. For example, the inability of kubelet/k8s executors to copy artifacts
+	// out of the base image layer. If unspecified, will use docker executor validation
+	ContainerRuntimeExecutor string
+}
 
 // wfValidationCtx is the context for validating a workflow spec
 type wfValidationCtx struct {
+	ValidateOpts
+
 	wf *wfv1.Workflow
 	// globalParams keeps track of variables which are available the global
 	// scope and can be referenced from anywhere.
@@ -36,21 +53,19 @@ const (
 	anyItemMagicValue = "item.*"
 )
 
-// ValidateWorkflow accepts a workflow and performs validation against it. If lint is specified as
-// true, will skip some validations which is permissible during linting but not submission
-func ValidateWorkflow(wf *wfv1.Workflow, lint ...bool) error {
+// ValidateWorkflow accepts a workflow and performs validation against it.
+func ValidateWorkflow(wf *wfv1.Workflow, opts ValidateOpts) error {
 	ctx := wfValidationCtx{
+		ValidateOpts: opts,
 		wf:           wf,
 		globalParams: make(map[string]string),
 		results:      make(map[string]bool),
 	}
-	linting := len(lint) > 0 && lint[0]
-
 	err := validateWorkflowFieldNames(wf.Spec.Templates)
 	if err != nil {
 		return errors.Errorf(errors.CodeBadRequest, "spec.templates%s", err.Error())
 	}
-	if linting {
+	if ctx.Lint {
 		// if we are just linting we don't care if spec.arguments.parameters.XXX doesn't have an
 		// explicit value. workflows without a default value is a desired use case
 		err = validateArgumentsFieldNames("spec.arguments.", wf.Spec.Arguments)
@@ -66,6 +81,14 @@ func ValidateWorkflow(wf *wfv1.Workflow, lint ...bool) error {
 	for _, param := range ctx.wf.Spec.Arguments.Parameters {
 		ctx.globalParams["workflow.parameters."+param.Name] = placeholderValue
 	}
+
+	for k := range ctx.wf.ObjectMeta.Annotations {
+		ctx.globalParams["workflow.annotations."+k] = placeholderValue
+	}
+	for k := range ctx.wf.ObjectMeta.Labels {
+		ctx.globalParams["workflow.labels."+k] = placeholderValue
+	}
+
 	if ctx.wf.Spec.Entrypoint == "" {
 		return errors.New(errors.CodeBadRequest, "spec.entrypoint is required")
 	}
@@ -111,6 +134,19 @@ func (ctx *wfValidationCtx) validateTemplate(tmpl *wfv1.Template, args wfv1.Argu
 		localParams[common.LocalVarPodName] = placeholderValue
 		scope[common.LocalVarPodName] = placeholderValue
 	}
+	if tmpl.IsLeaf() {
+		for _, art := range tmpl.Outputs.Artifacts {
+			if art.Path != "" {
+				scope[fmt.Sprintf("outputs.artifacts.%s.path", art.Name)] = true
+			}
+		}
+		for _, param := range tmpl.Outputs.Parameters {
+			if param.ValueFrom != nil && param.ValueFrom.Path != "" {
+				scope[fmt.Sprintf("outputs.parameters.%s.path", param.Name)] = true
+			}
+		}
+	}
+
 	_, err = common.ProcessArgs(tmpl, args, ctx.globalParams, localParams, true)
 	if err != nil {
 		return errors.Errorf(errors.CodeBadRequest, "templates.%s %s", tmpl.Name, err)
@@ -130,6 +166,10 @@ func (ctx *wfValidationCtx) validateTemplate(tmpl *wfv1.Template, args wfv1.Argu
 		return err
 	}
 	err = validateOutputs(scope, tmpl)
+	if err != nil {
+		return err
+	}
+	err = ctx.validateBaseImageOutputs(tmpl)
 	if err != nil {
 		return err
 	}
@@ -181,6 +221,7 @@ func validateInputs(tmpl *wfv1.Template) (map[string]interface{}, error) {
 			if art.Path == "" {
 				return nil, errors.Errorf(errors.CodeBadRequest, "templates.%s.%s.path not specified", tmpl.Name, artRef)
 			}
+			scope[fmt.Sprintf("inputs.artifacts.%s.path", art.Name)] = true
 		} else {
 			if art.Path != "" {
 				return nil, errors.Errorf(errors.CodeBadRequest, "templates.%s.%s.path only valid in container/script templates", tmpl.Name, artRef)
@@ -221,6 +262,11 @@ func resolveAllVariables(scope map[string]interface{}, tmplStr string) error {
 	fstTmpl := fasttemplate.New(tmplStr, "{{", "}}")
 
 	fstTmpl.ExecuteFuncString(func(w io.Writer, tag string) (int, error) {
+
+		// Skip the custom variable references
+		if !checkValidWorkflowVariablePrefix(tag) {
+			return 0, nil
+		}
 		_, ok := scope[tag]
 		if !ok && unresolvedErr == nil {
 			if (tag == "item" || strings.HasPrefix(tag, "item.")) && allowAllItemRefs {
@@ -234,6 +280,16 @@ func resolveAllVariables(scope map[string]interface{}, tmplStr string) error {
 		return 0, nil
 	})
 	return unresolvedErr
+}
+
+// checkValidWorkflowVariablePrefix is a helper methood check variable starts workflow root elements
+func checkValidWorkflowVariablePrefix(tag string) bool {
+	for _, rootTag := range common.GlobalVarValidWorkflowVariablePrefix {
+		if strings.HasPrefix(tag, rootTag) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateNonLeaf(tmpl *wfv1.Template) error {
@@ -269,6 +325,20 @@ func validateLeaf(scope map[string]interface{}, tmpl *wfv1.Template) error {
 				return errors.Errorf(errors.CodeBadRequest, "templates.%s.inputs.artifacts[%d].path '%s' already mounted in %s", tmpl.Name, i, art.Path, prev)
 			}
 			mountPaths[art.Path] = fmt.Sprintf("inputs.artifacts.%s", art.Name)
+		}
+	}
+	if tmpl.Resource != nil {
+		switch tmpl.Resource.Action {
+		case "get", "create", "apply", "delete", "replace", "patch":
+			// OK
+		default:
+			return errors.Errorf(errors.CodeBadRequest, "templates.%s.resource.action must be either get, create, apply, delete or replace", tmpl.Name)
+		}
+		// Try to unmarshal the given manifest.
+		obj := unstructured.Unstructured{}
+		err := yaml.Unmarshal([]byte(tmpl.Resource.Manifest), &obj)
+		if err != nil {
+			return errors.Errorf(errors.CodeBadRequest, "templates.%s.resource.manifest must be a valid yaml", tmpl.Name)
 		}
 	}
 	if tmpl.ActiveDeadlineSeconds != nil {
@@ -508,6 +578,51 @@ func validateOutputs(scope map[string]interface{}, tmpl *wfv1.Template) error {
 			errs := isValidParamOrArtifactName(param.GlobalName)
 			if len(errs) > 0 {
 				return errors.Errorf(errors.CodeBadRequest, "%s.globalName: %s", paramRef, errs[0])
+			}
+		}
+	}
+	return nil
+}
+
+// validateBaseImageOutputs detects if the template contains an output from
+func (ctx *wfValidationCtx) validateBaseImageOutputs(tmpl *wfv1.Template) error {
+	switch ctx.ContainerRuntimeExecutor {
+	case "", common.ContainerRuntimeExecutorDocker:
+		// docker executor supports all modes of artifact outputs
+	case common.ContainerRuntimeExecutorPNS:
+		// pns supports copying from the base image, but only if there is no volume mount underneath it
+		errMsg := "pns executor does not support outputs from base image layer with volume mounts. must use emptyDir"
+		for _, out := range tmpl.Outputs.Artifacts {
+			if common.FindOverlappingVolume(tmpl, out.Path) == nil {
+				// output is in the base image layer. need to verify there are no volume mounts under it
+				if tmpl.Container != nil {
+					for _, volMnt := range tmpl.Container.VolumeMounts {
+						if strings.HasPrefix(volMnt.MountPath, out.Path+"/") {
+							return errors.Errorf(errors.CodeBadRequest, "templates.%s.outputs.artifacts.%s: %s", tmpl.Name, out.Name, errMsg)
+						}
+					}
+
+				}
+				if tmpl.Script != nil {
+					for _, volMnt := range tmpl.Container.VolumeMounts {
+						if strings.HasPrefix(volMnt.MountPath, out.Path+"/") {
+							return errors.Errorf(errors.CodeBadRequest, "templates.%s.outputs.artifacts.%s: %s", tmpl.Name, out.Name, errMsg)
+						}
+					}
+				}
+			}
+		}
+	case common.ContainerRuntimeExecutorK8sAPI, common.ContainerRuntimeExecutorKubelet:
+		// for kubelet/k8s fail validation if we detect artifact is copied from base image layer
+		errMsg := fmt.Sprintf("%s executor does not support outputs from base image layer. must use emptyDir", ctx.ContainerRuntimeExecutor)
+		for _, out := range tmpl.Outputs.Artifacts {
+			if common.FindOverlappingVolume(tmpl, out.Path) == nil {
+				return errors.Errorf(errors.CodeBadRequest, "templates.%s.outputs.artifacts.%s: %s", tmpl.Name, out.Name, errMsg)
+			}
+		}
+		for _, out := range tmpl.Outputs.Parameters {
+			if out.ValueFrom != nil && common.FindOverlappingVolume(tmpl, out.ValueFrom.Path) == nil {
+				return errors.Errorf(errors.CodeBadRequest, "templates.%s.outputs.parameters.%s: %s", tmpl.Name, out.Name, errMsg)
 			}
 		}
 	}

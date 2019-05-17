@@ -20,7 +20,8 @@ import (
 )
 
 // ExecResource will run kubectl action against a manifest
-func (we *WorkflowExecutor) ExecResource(action string, manifestPath string, isDelete bool) (string, string, error) {
+func (we *WorkflowExecutor) ExecResource(action string, manifestPath string) (string, string, error) {
+	isDelete := action == "delete"
 	args := []string{
 		action,
 	}
@@ -31,6 +32,13 @@ func (we *WorkflowExecutor) ExecResource(action string, manifestPath string, isD
 	}
 
 	if action == "patch" {
+		mergeStrategy := "strategic"
+		if we.Template.Resource.MergeStrategy != "" {
+			mergeStrategy = we.Template.Resource.MergeStrategy
+		}
+
+		args = append(args, "--type")
+		args = append(args, mergeStrategy)
 
 		args = append(args, "-p")
 		buff, err := ioutil.ReadFile(manifestPath)

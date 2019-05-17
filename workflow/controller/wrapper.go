@@ -9,7 +9,9 @@ import (
 	wfv1 "github.com/argoproj/argo/pkg/apis/workflow/v1alpha1"
 	wfclientset "github.com/argoproj/argo/pkg/client/clientset/versioned"
 	"github.com/argoproj/argo/util/file"
+	"github.com/argoproj/argo/workflow/common"
 	log "github.com/sirupsen/logrus"
+	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"time"
@@ -44,7 +46,7 @@ func (wfc *WorkflowController) ReSyncWorkflow(ctx context.Context) {
 				continue
 			}
 
-			if wrapperGetSize(&wf) >= 500 * 1024 {
+			if wrapperGetSize(&wf) >= 500*1024 {
 				conditionTimes = 60
 			} else {
 				conditionTimes = 2
@@ -202,4 +204,34 @@ func wrapperGetSize(wf *wfv1.Workflow) int {
 		return len(nodeContent) - len(nodeStatus)
 	}
 	return len(nodeContent)
+}
+
+func (woc *wfOperationCtx) useNonRootExec(tmpl *wfv1.Template) bool {
+	if tmpl.SecurityContext != nil {
+		woc.log.Infof("newWaitContainer: add securityContext in tmpl (%++v)", *tmpl.SecurityContext)
+		//paas the runAsUser id into wf container
+		if *tmpl.SecurityContext.RunAsUser > 0 {
+			return true
+		}
+	}
+	return woc.controller.Config.NonRootExecutor
+}
+
+func (woc *wfOperationCtx) replaceSideCarForNonRoot(tmpl *wfv1.Template, ctr *apiv1.Container) *apiv1.Container {
+	if woc.useNonRootExec(tmpl) {
+		permissionInt := int64(common.NonrootArgoExecUid)
+		if ctr.SecurityContext != nil {
+			ctr.SecurityContext.RunAsUser = &permissionInt
+		} else {
+			sc := &apiv1.SecurityContext{
+				RunAsUser: &permissionInt,
+			}
+			ctr.SecurityContext = sc
+		}
+		//use custom noroot argoexec image if wf config RunAsUser within psp validation
+		ctr.Image = woc.controller.Config.NonRootExecutorImage
+		ctr.Command = []string{"/bin/exec.sh"}
+		ctr.Args = []string{}
+	}
+	return ctr
 }

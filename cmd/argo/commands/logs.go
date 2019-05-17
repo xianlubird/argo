@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"hash/fnv"
-
 	"math"
 	"os"
 	"strconv"
@@ -13,6 +12,9 @@ import (
 	"sync"
 	"time"
 
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -23,11 +25,8 @@ import (
 
 	"github.com/argoproj/argo/pkg/apis/workflow/v1alpha1"
 	workflowv1 "github.com/argoproj/argo/pkg/client/clientset/versioned/typed/workflow/v1alpha1"
+	"github.com/argoproj/argo/workflow/util"
 	"github.com/argoproj/pkg/errors"
-
-	log "github.com/sirupsen/logrus"
-	"github.com/spf13/cobra"
-	v1 "k8s.io/api/core/v1"
 )
 
 type logEntry struct {
@@ -137,7 +136,7 @@ func (p *logPrinter) PrintPodLogs(podName string) error {
 // Prints logs for workflow pod steps and return most recent log timestamp per pod name
 func (p *logPrinter) printRecentWorkflowLogs(wf *v1alpha1.Workflow) map[string]*time.Time {
 	var podNodes []v1alpha1.NodeStatus
-	err := CheckAndDecompress(wf)
+	err := util.DecompressWorkflow(wf)
 	if err != nil {
 		log.Warn(err)
 		return nil
@@ -199,14 +198,14 @@ func (p *logPrinter) printLiveWorkflowLogs(workflowName string, wfClient workflo
 	defer cancel()
 
 	processPods := func(wf *v1alpha1.Workflow) {
-		err := CheckAndDecompress(wf)
+		err := util.DecompressWorkflow(wf)
 		if err != nil {
 			log.Warn(err)
 			return
 		}
 		for id := range wf.Status.Nodes {
 			node := wf.Status.Nodes[id]
-			if node.Type == v1alpha1.NodeTypePod && node.Phase != v1alpha1.NodeError && streamedPods[node.ID] == false {
+			if node.Type == v1alpha1.NodeTypePod && node.Phase != v1alpha1.NodeError && !streamedPods[node.ID] {
 				streamedPods[node.ID] = true
 				go func() {
 					var sinceTimePtr *metav1.Time
@@ -371,7 +370,7 @@ func mergeSorted(logs [][]logEntry) []logEntry {
 		left := logs[0]
 		right := logs[1]
 		size, i, j := len(left)+len(right), 0, 0
-		merged := make([]logEntry, size, size)
+		merged := make([]logEntry, size)
 
 		for k := 0; k < size; k++ {
 			if i > len(left)-1 && j <= len(right)-1 {

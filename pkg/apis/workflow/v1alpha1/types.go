@@ -209,9 +209,15 @@ type Template struct {
 	// Suspend template subtype which can suspend a workflow when reaching the step
 	Suspend *SuspendTemplate `json:"suspend,omitempty"`
 
+	// Volumes is a list of volumes that can be mounted by containers in a template.
+	Volumes []apiv1.Volume `json:"volumes,omitempty"`
+
+	// InitContainers is a list of containers which run before the main container.
+	InitContainers []UserContainer `json:"initContainers,omitempty"`
+
 	// Sidecars is a list of containers which run alongside the main container
 	// Sidecars are automatically killed when the main container completes
-	Sidecars []Sidecar `json:"sidecars,omitempty"`
+	Sidecars []UserContainer `json:"sidecars,omitempty"`
 
 	// Location in which all files related to the step will be stored (logs, artifacts, etc...).
 	// Can be overridden by individual items in Outputs. If omitted, will use the default
@@ -326,6 +332,9 @@ type Artifact struct {
 
 	// Archive controls how the artifact will be saved to the artifact repository.
 	Archive *ArchiveStrategy `json:"archive,omitempty"`
+
+	// Make Artifacts optional, if Artifacts doesn't generate or exist
+	Optional bool `json:"optional,omitempty"`
 }
 
 // ArchiveStrategy describes how to archive files/directory when saving artifacts
@@ -471,12 +480,12 @@ type Arguments struct {
 	Artifacts []Artifact `json:"artifacts,omitempty"`
 }
 
-// Sidecar is a container which runs alongside the main container
-type Sidecar struct {
+// UserContainer is a container specified by a user.
+type UserContainer struct {
 	apiv1.Container `json:",inline"`
 
 	// MirrorVolumeMounts will mount the same volumes specified in the main container
-	// to the sidecar (including artifacts), at the same mountPaths. This enables
+	// to the container (including artifacts), at the same mountPaths. This enables
 	// dind daemon to partially see the same filesystem as the main container in
 	// order to use features such as docker volume binding
 	MirrorVolumeMounts *bool `json:"mirrorVolumeMounts,omitempty"`
@@ -659,6 +668,10 @@ func (s *S3Artifact) String() string {
 	return fmt.Sprintf("%s://%s/%s/%s", protocol, s.Endpoint, s.Bucket, s.Key)
 }
 
+func (s *S3Artifact) HasLocation() bool {
+	return s != nil && s.Bucket != ""
+}
+
 // GitArtifact is the location of an git artifact
 type GitArtifact struct {
 	// Repo is the git repository
@@ -678,6 +691,10 @@ type GitArtifact struct {
 
 	// InsecureIgnoreHostKey disables SSH strict host key checking during git clone
 	InsecureIgnoreHostKey bool `json:"insecureIgnoreHostKey,omitempty"`
+}
+
+func (g *GitArtifact) HasLocation() bool {
+	return g != nil && g.Repo != ""
 }
 
 // ArtifactoryAuth describes the secret selectors required for authenticating to artifactory
@@ -700,6 +717,10 @@ func (a *ArtifactoryArtifact) String() string {
 	return a.URL
 }
 
+func (a *ArtifactoryArtifact) HasLocation() bool {
+	return a != nil && a.URL != ""
+}
+
 // HDFSArtifact is the location of an HDFS artifact
 type HDFSArtifact struct {
 	HDFSConfig `json:",inline"`
@@ -709,6 +730,10 @@ type HDFSArtifact struct {
 
 	// Force copies a file forcibly even if it exists (default: false)
 	Force bool `json:"force,omitempty"`
+}
+
+func (h *HDFSArtifact) HasLocation() bool {
+	return h != nil && len(h.Addresses) > 0
 }
 
 // HDFSConfig is configurations for HDFS
@@ -768,10 +793,18 @@ type RawArtifact struct {
 	Data string `json:"data"`
 }
 
+func (r *RawArtifact) HasLocation() bool {
+	return r != nil
+}
+
 // HTTPArtifact allows an file served on HTTP to be placed as an input artifact in a container
 type HTTPArtifact struct {
 	// URL of the artifact
 	URL string `json:"url"`
+}
+
+func (h *HTTPArtifact) HasLocation() bool {
+	return h != nil && h.URL != ""
 }
 
 // ScriptTemplate is a template subtype to enable scripting through code steps
@@ -785,11 +818,18 @@ type ScriptTemplate struct {
 // ResourceTemplate is a template subtype to manipulate kubernetes resources
 type ResourceTemplate struct {
 	// Action is the action to perform to the resource.
-	// Must be one of: get, create, apply, delete, replace
+	// Must be one of: get, create, apply, delete, replace, patch
 	Action string `json:"action"`
+
+	// MergeStrategy is the strategy used to merge a patch. It defaults to "strategic"
+	// Must be one of: strategic, merge, json
+	MergeStrategy string `json:"mergeStrategy,omitempty"`
 
 	// Manifest contains the kubernetes manifest
 	Manifest string `json:"manifest"`
+
+	// SetOwnerReference sets the reference to the workflow on the OwnerReference of generated resource.
+	SetOwnerReference bool `json:"setOwnerReference,omitempty"`
 
 	// SuccessCondition is a label selector expression which describes the conditions
 	// of the k8s resource in which it is acceptable to proceed to the following step
@@ -953,7 +993,12 @@ func (args *Arguments) GetParameterByName(name string) *Parameter {
 
 // HasLocation whether or not an artifact has a location defined
 func (a *Artifact) HasLocation() bool {
-	return a.S3 != nil || a.Git != nil || a.HTTP != nil || a.Artifactory != nil || a.Raw != nil || a.HDFS != nil
+	return a.S3.HasLocation() ||
+		a.Git.HasLocation() ||
+		a.HTTP.HasLocation() ||
+		a.Artifactory.HasLocation() ||
+		a.Raw.HasLocation() ||
+		a.HDFS.HasLocation()
 }
 
 // GetTemplate retrieves a defined template by its name
@@ -989,10 +1034,10 @@ func continues(c *ContinueOn, phase NodePhase) bool {
 	if c == nil {
 		return false
 	}
-	if c.Error == true && phase == NodeError {
+	if c.Error && phase == NodeError {
 		return true
 	}
-	if c.Failed == true && phase == NodeFailed {
+	if c.Failed && phase == NodeFailed {
 		return true
 	}
 	return false
