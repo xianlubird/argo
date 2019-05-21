@@ -197,8 +197,10 @@ func getPodMetrics(node wfv1.NodeStatus, metricsConfigMap *v1.ConfigMap) (float6
 
 	podCpuMetrics /= 1000
 	podMaxCpu /= 1000
+	podMaxCpu *= 60
 	podMemoryMetrics /= 1024 * 1024 * 1024
 	podMaxMemory /= 1024 * 1024 * 1024
+	podMaxMemory *= 60
 	return Decimal(podCpuMetrics), Decimal(podMemoryMetrics), Decimal(podMaxCpu), Decimal(podMaxMemory)
 }
 
