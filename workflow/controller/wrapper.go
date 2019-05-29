@@ -12,12 +12,20 @@ import (
 	"github.com/argoproj/argo/workflow/common"
 	log "github.com/sirupsen/logrus"
 	apiv1 "k8s.io/api/core/v1"
+	policy_v1beta1 "k8s.io/api/policy/v1beta1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"strings"
 	"time"
+	"sort"
 )
 
 var workflowRecordLimitMap = make(map[string]int)
+
+const (
+	CustomBindingSuffix = "-restrictedbinding"
+)
 
 //const aliyunRetryKey = "aliyun.retry"
 
@@ -234,4 +242,98 @@ func (woc *wfOperationCtx) replaceSideCarForNonRoot(tmpl *wfv1.Template, ctr *ap
 		ctr.Args = []string{}
 	}
 	return ctr
+}
+
+func (woc *wfOperationCtx) findGourpLimitInPsp(namespace string) (int64, error) {
+	var group int64
+	restConfig := woc.controller.restConfig
+
+	clientset, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		return group, errors.InternalWrapError(err)
+	}
+
+	rbList, err := clientset.RbacV1().RoleBindings(namespace).List(meta_v1.ListOptions{})
+	if err != nil {
+		return group, errors.InternalWrapError(err)
+	}
+	for _, rb := range rbList.Items {
+		if strings.HasSuffix(rb.Name, CustomBindingSuffix) {
+			refClusterRole := rb.RoleRef.Name
+			woc.log.Infof("findGourpLimitInPsp: found the binding clusterrole (%s) in namespace %s", refClusterRole, namespace)
+
+			group, err = getGroupIdInBindingPsp(clientset, refClusterRole)
+			if err != nil {
+				woc.log.Infof("findGourpLimitInPsp: found the binding clusterrole (%s) in namespace %s", refClusterRole, namespace)
+			} else if group > 0 {
+				return group, nil
+			}
+		}
+	}
+
+	return group, nil
+}
+
+func StringInSlice(targetStr string, strlist []string) bool {
+	for _, s := range strlist {
+		if s == targetStr {
+			return true
+		}
+	}
+	return false
+}
+
+func getGroupIdInBindingPsp(clientset *kubernetes.Clientset, refClusterRole string) (int64, error) {
+	var group int64
+	cr, err := clientset.RbacV1().ClusterRoles().Get(refClusterRole, meta_v1.GetOptions{})
+	if err != nil {
+		return group, errors.InternalWrapError(err)
+	}
+	var pspNames []string
+	for _, rule := range cr.Rules {
+		if StringInSlice("podsecuritypolicies", rule.Resources) && StringInSlice("use", rule.Verbs) {
+			pspNames = rule.ResourceNames
+			break
+		}
+	}
+	if len(pspNames) > 0 {
+		sort.Strings(pspNames)
+		for _, pspName := range pspNames{
+			psp, err := clientset.Policy().PodSecurityPolicies().Get(pspName, meta_v1.GetOptions{})
+			if err != nil {
+				return group, errors.InternalWrapError(err)
+			}
+			if psp.Spec.FSGroup.Size() > 0 && (psp.Spec.FSGroup.Rule == policy_v1beta1.FSGroupStrategyMustRunAs) {
+				for _, fsRange := range psp.Spec.FSGroup.Ranges {
+					return fsRange.Min, nil
+				}
+			}
+		}
+	}
+	return group, nil
+}
+
+func (woc *wfOperationCtx) dialWithSecurityContext(mainCtr apiv1.Container, tmpl *wfv1.Template) apiv1.Container {
+	if tmpl.SecurityContext != nil {
+		woc.log.Infof("createWorkflowPod: add SecurityContext in tmpl (%v)", *tmpl.SecurityContext)
+		//paas the runAsUser id into wf container
+		if *tmpl.SecurityContext.RunAsUser > 0 {
+			sc := &apiv1.SecurityContext{
+				RunAsUser: tmpl.SecurityContext.RunAsUser,
+			}
+			mainCtr.SecurityContext = sc
+		}
+	}
+	//TODO replace this if RunAsGroup supported in psp policy meta (>= 1.13)
+	gid, err := woc.findGourpLimitInPsp(woc.wf.ObjectMeta.Namespace)
+	if err != nil {
+		woc.log.Warningf("error occur when query wf runtime gid, err: %v", err)
+	} else if gid != 0 {
+		woc.log.Infof("add 'RunAsGroup' %s into sc for template %s, gid %d", tmpl.Name, gid)
+		mainCtr.SecurityContext.RunAsGroup = &gid
+	} else {
+		woc.log.Warningf("no gid found in binding psp for given template %s, namespace %s", tmpl.Name, woc.wf.ObjectMeta.Namespace)
+	}
+
+	return mainCtr
 }

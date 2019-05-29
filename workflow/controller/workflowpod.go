@@ -75,16 +75,7 @@ func (woc *wfOperationCtx) createWorkflowPod(nodeName string, mainCtr apiv1.Cont
 	wfSpec := woc.wf.Spec.DeepCopy()
 	mainCtr.Name = common.MainContainerName
 	//paas the runAsUser id into wf container if exist
-	if tmpl.SecurityContext != nil {
-		woc.log.Infof("createWorkflowPod: add SecurityContext in tmpl (%v)", *tmpl.SecurityContext)
-		//paas the runAsUser id into wf container
-		if *tmpl.SecurityContext.RunAsUser > 0 {
-			sc := &apiv1.SecurityContext{
-				RunAsUser: tmpl.SecurityContext.RunAsUser,
-			}
-			mainCtr.SecurityContext = sc
-		}
-	}
+	mainCtr = woc.dialWithSecurityContext(mainCtr, tmpl)
 	pod := &apiv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      nodeID,
