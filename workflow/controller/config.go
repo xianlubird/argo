@@ -75,6 +75,8 @@ type WorkflowControllerConfig struct {
 
 	// Parallelism limits the max total parallel workflows that can execute at the same time
 	Parallelism int `json:"parallelism,omitempty"`
+
+	ExtraConfig AliyunExtraConfig `json:"extraConfig,omitempty"`
 }
 
 // KubeConfig is used for wait & init sidecar containers to communicate with a k8s apiserver by a outofcluster method,

@@ -16,9 +16,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"sort"
 	"strings"
 	"time"
-	"sort"
 )
 
 var workflowRecordLimitMap = make(map[string]int)
@@ -26,6 +26,11 @@ var workflowRecordLimitMap = make(map[string]int)
 const (
 	CustomBindingSuffix = "-restrictedbinding"
 )
+
+type AliyunExtraConfig struct {
+	EnableHostNetwork bool   `json:"enableHostNetwork,omitempty"`
+	DefaultDnsPolicy  string `json:"defaultDnsPolicy,omitempty"`
+}
 
 //const aliyunRetryKey = "aliyun.retry"
 
@@ -298,7 +303,7 @@ func getGroupIdInBindingPsp(clientset *kubernetes.Clientset, refClusterRole stri
 	}
 	if len(pspNames) > 0 {
 		sort.Strings(pspNames)
-		for _, pspName := range pspNames{
+		for _, pspName := range pspNames {
 			psp, err := clientset.Policy().PodSecurityPolicies().Get(pspName, meta_v1.GetOptions{})
 			if err != nil {
 				return group, errors.InternalWrapError(err)
@@ -336,4 +341,29 @@ func (woc *wfOperationCtx) dialWithSecurityContext(mainCtr apiv1.Container, tmpl
 	}
 
 	return mainCtr
+}
+
+func (woc *wfOperationCtx) UpdateAliyunExtraConfig(pod *apiv1.Pod) {
+	if pod == nil {
+		return
+	}
+	if woc.controller.Config.ExtraConfig.EnableHostNetwork {
+		pod.Spec.HostNetwork = true
+	}
+
+	dnsPolicy := woc.controller.Config.ExtraConfig.DefaultDnsPolicy
+	if dnsPolicy == "" {
+		return
+	}
+	dnsPolicyMap := map[string]bool{
+		string(apiv1.DNSClusterFirstWithHostNet): true,
+		string(apiv1.DNSClusterFirst):            true,
+		string(apiv1.DNSDefault):                 true,
+		string(apiv1.DNSNone):                    true,
+	}
+	if ok := dnsPolicyMap[dnsPolicy]; ok {
+		pod.Spec.DNSPolicy = apiv1.DNSPolicy(dnsPolicy)
+	} else {
+		log.Warningf("UpdateAliyunExtraConfig pod name %s dnsPolicy %s is inValidate", pod.Name, dnsPolicy)
+	}
 }

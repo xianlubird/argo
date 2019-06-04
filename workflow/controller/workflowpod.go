@@ -119,6 +119,8 @@ func (woc *wfOperationCtx) createWorkflowPod(nodeName string, mainCtr apiv1.Cont
 		pod.Spec.ShareProcessNamespace = pointer.BoolPtr(true)
 	}
 
+	woc.UpdateAliyunExtraConfig(pod)
+
 	err := woc.addArchiveLocation(pod, tmpl)
 	if err != nil {
 		return nil, err
