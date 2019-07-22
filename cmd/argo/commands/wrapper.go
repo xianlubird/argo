@@ -39,7 +39,7 @@ func NewTopCommand() *cobra.Command {
 
 func getMetricsConfigMap(wf *wfv1.Workflow, kubeClient *kubernetes.Clientset) *v1.ConfigMap {
 	cm, err := kubeClient.CoreV1().ConfigMaps(wf.Namespace).Get(wf.Name, metav1.GetOptions{})
-	if err != nil && !errors.IsNotFound(err){
+	if err != nil && !errors.IsNotFound(err) {
 		log.Warningf("getMetricsConfigMap error %v", err)
 		return nil
 	}
@@ -202,6 +202,48 @@ func getPodMetrics(node wfv1.NodeStatus, metricsConfigMap *v1.ConfigMap) (float6
 	return Decimal(podCpuMetrics), Decimal(podMemoryMetrics), Decimal(podMaxCpu), Decimal(podMaxMemory)
 }
 
+func getNodeInfoMetrics(node wfv1.NodeStatus, metricsConfigMap *v1.ConfigMap) (string, string, float64, float64) {
+	if node.Type != wfv1.NodeTypePod || metricsConfigMap == nil {
+		return "", "", 0, 0
+	}
+
+	data := metricsConfigMap.Data
+	nodeName := ""
+	nodeProviderID := ""
+	cpuRateStr := ""
+	memoryRateStr := ""
+	for key, value := range data {
+		tmpMsgArray := strings.Split(key, "_")
+		if len(tmpMsgArray) < 4 {
+			continue
+		}
+		if tmpMsgArray[0] != node.ID {
+			continue
+		}
+		nodeName = tmpMsgArray[1]
+		nodeProviderID = tmpMsgArray[2]
+		if tmpMsgArray[3] == "maxCpu" {
+			cpuRateStr = value
+		}
+		if tmpMsgArray[3] == "maxMemory" {
+			memoryRateStr = value
+		}
+	}
+
+	processStringToFloat64Func := func(tmpNodeStr string) float64 {
+		tmpPodValue, tmpErr := strconv.ParseFloat(tmpNodeStr, 64)
+		if tmpErr != nil {
+			log.Warningf("Parse %s to float64 error %v", tmpNodeStr, tmpErr)
+			return 0
+		}
+		return tmpPodValue
+	}
+
+
+	return nodeName, nodeProviderID, 100*Decimal(processStringToFloat64Func(cpuRateStr)),
+	100*Decimal(processStringToFloat64Func(memoryRateStr))
+}
+
 func SetClientConfig(client clientcmd.ClientConfig) {
 	clientConfig = client
 }
@@ -285,4 +327,18 @@ type PodStatusSum struct {
 //Do not remove, it's used for ags cli
 func InitKubeClient() *kubernetes.Clientset {
 	return initKubeClient()
+}
+
+func getNodeInfoConfigMap(wf *wfv1.Workflow, kubeClient *kubernetes.Clientset) *v1.ConfigMap {
+	if wf == nil {
+		return nil
+	}
+	nodeInfoConfigMapName := fmt.Sprintf("%s.node", wf.Name)
+	cm, err := kubeClient.CoreV1().ConfigMaps(wf.Namespace).Get(nodeInfoConfigMapName, metav1.GetOptions{})
+	if err != nil {
+		log.Warnf("Nodeinfo %s not found", nodeInfoConfigMapName)
+		return nil
+	}
+
+	return cm
 }

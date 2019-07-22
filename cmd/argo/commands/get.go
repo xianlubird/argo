@@ -21,14 +21,17 @@ import (
 const onExitSuffix = "onExit"
 
 var (
-	kubeClient       *kubernetes.Clientset
-	showResUsage     bool
-	showMetrics      bool
-	showSumInfo      bool
-	metricsConfigMap *v1.ConfigMap
-	podStatusSumInfo *PodStatusSum
-	status        string // --status
+	kubeClient        *kubernetes.Clientset
+	showResUsage      bool
+	showMetrics       bool
+	showNodeInfo      bool
+	showSumInfo       bool
+	metricsConfigMap  *v1.ConfigMap
+	nodeInfoConfigMap *v1.ConfigMap
+	podStatusSumInfo  *PodStatusSum
+	status            string // --status
 )
+
 type getFlags struct {
 	output string
 	status string
@@ -57,6 +60,9 @@ func NewGetCommand() *cobra.Command {
 			if showMetrics {
 				metricsConfigMap = getMetricsConfigMap(wf, kubeClient)
 			}
+			if showNodeInfo {
+				nodeInfoConfigMap = getNodeInfoConfigMap(wf, kubeClient)
+			}
 			if showSumInfo {
 				podStatusSumInfo = CalculateWorkflowPodStatus(wf)
 			}
@@ -73,6 +79,7 @@ func NewGetCommand() *cobra.Command {
 	command.Flags().BoolVar(&showResUsage, "show", false, "Show workflow resource usage")
 	command.Flags().BoolVar(&showMetrics, "metrics", false, "Show workflow metrics usage")
 	command.Flags().BoolVar(&showSumInfo, "sum-info", false, "Show workflow sum info")
+	command.Flags().BoolVar(&showNodeInfo, "node", false, "Show node name and metrics info")
 	command.Flags().StringVar(&getArgs.status, "status", "", "Filter by status (Pending, Running, Succeeded, Skipped, Failed, Error)")
 	return command
 }
@@ -195,6 +202,9 @@ func printWorkflowHelper(wf *wfv1.Workflow, getArgs getFlags) {
 				fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tMESSAGE\tCPU(core*hour)\tMEMORY(GB*hour)\n", ansiFormat("STEP", FgDefault))
 			} else if showMetrics {
 				fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tMESSAGE\tCPU(core*hour)\tMEMORY(GB*hour)\tMaxCpu(core)\tMaxMemory(GB)\n",
+					ansiFormat("STEP", FgDefault))
+			} else if showNodeInfo {
+				fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tMESSAGE\tNODENAME\tPROVIDERID\tMaxCPURate(%%)\tMaxMemoryRate(%%)\n",
 					ansiFormat("STEP", FgDefault))
 			} else {
 				fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tMESSAGE\n", ansiFormat("STEP", FgDefault))
@@ -490,6 +500,10 @@ func printNode(w *tabwriter.Writer, wf *wfv1.Workflow, node wfv1.NodeStatus, dep
 		} else if showMetrics {
 			cpu, memory, maxCpu, maxMemory := getPodMetrics(node, metricsConfigMap)
 			args = []interface{}{nodePrefix, nodeName, node.ID, duration, node.Message, cpu, memory, maxCpu, maxMemory}
+		} else if showNodeInfo {
+			machineNodeName, providerID, nodeCpuRate, nodeMemoryRate := getNodeInfoMetrics(node, nodeInfoConfigMap)
+			args = []interface{}{nodePrefix, nodeName, node.ID, duration, node.Message, machineNodeName, providerID,
+				nodeCpuRate, nodeMemoryRate}
 		} else {
 			args = []interface{}{nodePrefix, nodeName, node.ID, duration, node.Message}
 		}
@@ -499,6 +513,8 @@ func printNode(w *tabwriter.Writer, wf *wfv1.Workflow, node wfv1.NodeStatus, dep
 			args = []interface{}{nodePrefix, nodeName, "", "", node.Message, 0.0, 0.0}
 		} else if showMetrics {
 			args = []interface{}{nodePrefix, nodeName, "", "", node.Message, 0.0, 0.0, 0.0, 0.0}
+		} else if showNodeInfo {
+			args = []interface{}{nodePrefix, nodeName, "", "", node.Message, "", "", 0.0, 0.0}
 		} else {
 			args = []interface{}{nodePrefix, nodeName, "", "", node.Message}
 		}
@@ -513,6 +529,8 @@ func printNode(w *tabwriter.Writer, wf *wfv1.Workflow, node wfv1.NodeStatus, dep
 			fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\t%g\t%g\n", args...)
 		} else if showMetrics {
 			fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\t%g\t%g\t%g\t%g\n", args...)
+		} else if showNodeInfo {
+			fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\t%s\t%s\t%g\t%g\n", args...)
 		} else {
 			fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\n", args...)
 		}
