@@ -204,7 +204,7 @@ func printWorkflowHelper(wf *wfv1.Workflow, getArgs getFlags) {
 				fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tMESSAGE\tCPU(core*hour)\tMEMORY(GB*hour)\tMaxCpu(core)\tMaxMemory(GB)\n",
 					ansiFormat("STEP", FgDefault))
 			} else if showNodeInfo {
-				fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tMESSAGE\tNODENAME\tPROVIDERID\tMaxCPURate(%%)\tMaxMemoryRate(%%)\n",
+				fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tMESSAGE\tNODENAME\tPROVIDERID\n",
 					ansiFormat("STEP", FgDefault))
 			} else {
 				fmt.Fprintf(w, "%s\tPODNAME\tDURATION\tMESSAGE\n", ansiFormat("STEP", FgDefault))
@@ -501,9 +501,8 @@ func printNode(w *tabwriter.Writer, wf *wfv1.Workflow, node wfv1.NodeStatus, dep
 			cpu, memory, maxCpu, maxMemory := getPodMetrics(node, metricsConfigMap)
 			args = []interface{}{nodePrefix, nodeName, node.ID, duration, node.Message, cpu, memory, maxCpu, maxMemory}
 		} else if showNodeInfo {
-			machineNodeName, providerID, nodeCpuRate, nodeMemoryRate := getNodeInfoMetrics(node, nodeInfoConfigMap)
-			args = []interface{}{nodePrefix, nodeName, node.ID, duration, node.Message, machineNodeName, providerID,
-				nodeCpuRate, nodeMemoryRate}
+			machineNodeName, providerID, _, _ := getNodeInfoMetrics(node, nodeInfoConfigMap)
+			args = []interface{}{nodePrefix, nodeName, node.ID, duration, node.Message, machineNodeName, providerID}
 		} else {
 			args = []interface{}{nodePrefix, nodeName, node.ID, duration, node.Message}
 		}
@@ -514,7 +513,7 @@ func printNode(w *tabwriter.Writer, wf *wfv1.Workflow, node wfv1.NodeStatus, dep
 		} else if showMetrics {
 			args = []interface{}{nodePrefix, nodeName, "", "", node.Message, 0.0, 0.0, 0.0, 0.0}
 		} else if showNodeInfo {
-			args = []interface{}{nodePrefix, nodeName, "", "", node.Message, "", "", 0.0, 0.0}
+			args = []interface{}{nodePrefix, nodeName, "", "", node.Message, "", ""}
 		} else {
 			args = []interface{}{nodePrefix, nodeName, "", "", node.Message}
 		}
@@ -530,7 +529,7 @@ func printNode(w *tabwriter.Writer, wf *wfv1.Workflow, node wfv1.NodeStatus, dep
 		} else if showMetrics {
 			fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\t%g\t%g\t%g\t%g\n", args...)
 		} else if showNodeInfo {
-			fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\t%s\t%s\t%g\t%g\n", args...)
+			fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\t%s\t%s\n", args...)
 		} else {
 			fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\n", args...)
 		}

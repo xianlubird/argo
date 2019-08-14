@@ -233,7 +233,7 @@ func getNodeInfoMetrics(node wfv1.NodeStatus, metricsConfigMap *v1.ConfigMap) (s
 	processStringToFloat64Func := func(tmpNodeStr string) float64 {
 		tmpPodValue, tmpErr := strconv.ParseFloat(tmpNodeStr, 64)
 		if tmpErr != nil {
-			log.Warningf("Parse %s to float64 error %v", tmpNodeStr, tmpErr)
+			//log.Warningf("Parse %s to float64 error %v", tmpNodeStr, tmpErr)
 			return 0
 		}
 		return tmpPodValue
